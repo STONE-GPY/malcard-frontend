@@ -1,0 +1,143 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=390, initial-scale=1.0">
+<title>MalCard - 분석 중</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet">
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Pretendard', -apple-system, sans-serif;
+  background: #F8F6F2;
+  width: 390px;
+  min-height: 844px;
+  margin: 0 auto;
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+}
+
+.wrap { text-align: center; padding: 40px 24px; width: 100%; }
+
+/* Flipping card visual */
+.card-visual {
+  width: 100px; height: 130px;
+  margin: 0 auto 28px; position: relative;
+}
+.card-front {
+  width: 100%; height: 100%;
+  background: white; border-radius: 16px;
+  box-shadow: 0 4px 16px rgba(108,92,231,0.12);
+  display: flex; flex-direction: column;
+  align-items: center; justify-content: center;
+  overflow: hidden;
+}
+.card-front::before {
+  content: ''; position: absolute; top: 0; left: 0; right: 0; height: 4px;
+  background: linear-gradient(90deg, #6C5CE7, #A29BFE);
+}
+.card-front .emoji { font-size: 32px; margin-bottom: 6px; }
+.card-front .text { font-size: 13px; font-weight: 800; color: #2D2A26; }
+
+/* Stack illusion */
+.card-visual::before {
+  content: ''; position: absolute;
+  top: 3px; left: 5px; right: 5px; bottom: -3px;
+  background: #EFEBE5; border-radius: 16px; z-index: -1;
+}
+.card-visual::after {
+  content: ''; position: absolute;
+  top: 6px; left: 10px; right: 10px; bottom: -6px;
+  background: #E8E4DE; border-radius: 16px; z-index: -2;
+}
+
+.title { font-size: 20px; font-weight: 800; color: #2D2A26; margin-bottom: 6px; }
+.sub { font-size: 13px; color: #8C857A; margin-bottom: 36px; }
+
+/* Steps */
+.steps {
+  display: flex; flex-direction: column; gap: 10px;
+  width: 100%; max-width: 300px; margin: 0 auto;
+}
+.step {
+  display: flex; align-items: center; gap: 12px;
+  padding: 12px 14px; border-radius: 14px;
+  background: white; border: 1.5px solid #F0ECE6;
+}
+.step.active { border-color: #6C5CE7; }
+.step.done { border-color: #66BB6A; background: #FAFFF9; }
+.step-icon {
+  width: 32px; height: 32px; border-radius: 8px;
+  display: flex; align-items: center; justify-content: center; flex-shrink: 0;
+}
+.step.waiting .step-icon { background: #F8F6F2; }
+.step.active .step-icon { background: #F0EDFF; }
+.step.done .step-icon { background: #E8F5E9; }
+.step-label { font-size: 13px; font-weight: 600; color: #2D2A26; }
+.step.waiting .step-label { color: #C4BEB6; }
+.step-desc { font-size: 11px; color: #B5AFA7; margin-top: 1px; }
+.step.waiting .step-desc { color: #DDD8D0; }
+
+.dots { display: flex; gap: 3px; margin-left: auto; }
+.dots .d {
+  width: 4px; height: 4px; border-radius: 50%;
+  background: #6C5CE7;
+  animation: b 1.4s infinite ease-in-out;
+}
+.dots .d:nth-child(2) { animation-delay: 0.2s; }
+.dots .d:nth-child(3) { animation-delay: 0.4s; }
+@keyframes b {
+  0%,80%,100% { opacity: 0.3; transform: scale(0.6); }
+  40% { opacity: 1; transform: scale(1); }
+}
+
+.tip {
+  margin-top: 32px; padding: 14px 16px;
+  background: white; border-radius: 14px; border: 1px solid #F0ECE6;
+  display: flex; align-items: flex-start; gap: 8px;
+  max-width: 300px; width: 100%; text-align: left;
+}
+.tip-text { font-size: 12px; color: #6B6560; line-height: 1.5; }
+.tip-text strong { color: #6C5CE7; }
+</style>
+</head>
+<body><div id="mobile-frame" style="width:390px;min-height:844px;margin:0;position:relative;overflow:hidden;background:linear-gradient(180deg,#F8F6F2 0%,#F0EDFF 100%);display:flex;flex-direction:column;align-items:center;justify-content:center;">
+<div class="wrap">
+  <div class="card-visual">
+    <div class="card-front">
+      <div class="emoji">🎙️</div>
+      <div class="text">분석 중</div>
+    </div>
+  </div>
+
+  <div class="title">카드를 뒤집고 있어요</div>
+  <div class="sub">발음을 분석하고 피드백을 준비해요</div>
+
+  <div class="steps">
+    <div class="step done">
+      <div class="step-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#43A047" stroke-width="2.5"><polyline points="20 6 9 17 4 12"/></svg></div>
+      <div><div class="step-label">음성 수신 완료</div><div class="step-desc">오디오 업로드됨</div></div>
+    </div>
+    <div class="step active">
+      <div class="step-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" stroke-width="2"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2"/></svg></div>
+      <div><div class="step-label">발음 분석 중...</div><div class="step-desc">음소 단위로 비교 중</div></div>
+      <div class="dots"><div class="d"></div><div class="d"></div><div class="d"></div></div>
+    </div>
+    <div class="step waiting">
+      <div class="step-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#DDD8D0" stroke-width="2"><path d="M22 12h-4l-3 9L9 3l-3 9H2"/></svg></div>
+      <div><div class="step-label">억양 분석</div><div class="step-desc">피치 곡선 추출</div></div>
+    </div>
+    <div class="step waiting">
+      <div class="step-icon"><svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#DDD8D0" stroke-width="2"><path d="M21 15a2 2 0 0 1-2 2H7l-4 4V5a2 2 0 0 1 2-2h14a2 2 0 0 1 2 2z"/></svg></div>
+      <div><div class="step-label">피드백 생성</div><div class="step-desc">AI 교정 조언</div></div>
+    </div>
+  </div>
+
+  <div class="tip">
+    <span style="font-size:16px;flex-shrink:0">💡</span>
+    <span class="tip-text">러시아어 화자는 <strong>'ㅂ'과 'ㅃ'</strong> 구분이 어려울 수 있어요. 입술을 꽉 다물었다 터뜨려 보세요!</span>
+  </div>
+</div>
+</div></body>
+</html>

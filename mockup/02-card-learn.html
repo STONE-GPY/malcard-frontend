@@ -1,0 +1,168 @@
+<!DOCTYPE html>
+<html lang="ko">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=390, initial-scale=1.0">
+<title>MalCard - 카드 학습</title>
+<link href="https://cdn.jsdelivr.net/gh/orioncactus/pretendard/dist/web/static/pretendard.css" rel="stylesheet">
+<script src="https://mcp.figma.com/mcp/html-to-design/capture.js" async></script>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body {
+  font-family: 'Pretendard', -apple-system, sans-serif;
+  background: #F8F6F2;
+  width: 390px;
+  min-height: 844px;
+  margin: 0 auto;
+}
+
+.top-bar {
+  display: flex; align-items: center; justify-content: space-between;
+  padding: 54px 20px 12px;
+}
+.back-btn {
+  width: 40px; height: 40px; border-radius: 12px;
+  background: white; display: flex; align-items: center; justify-content: center;
+  box-shadow: 0 1px 4px rgba(0,0,0,0.06);
+}
+.top-title { font-size: 15px; font-weight: 700; color: #2D2A26; }
+.card-counter { font-size: 13px; font-weight: 600; color: #6C5CE7; }
+
+/* Progress */
+.progress-wrap { padding: 4px 20px 20px; }
+.progress-track {
+  height: 4px; background: #E8E4DE; border-radius: 4px; overflow: hidden;
+}
+.progress-fill {
+  height: 100%; width: 25%; border-radius: 4px;
+  background: #6C5CE7;
+}
+
+/* The Card */
+.card-area { padding: 0 20px; }
+.the-card {
+  background: white; border-radius: 22px;
+  box-shadow: 0 2px 12px rgba(0,0,0,0.06);
+  overflow: hidden;
+}
+.card-stripe { height: 5px; background: linear-gradient(90deg, #6C5CE7, #A29BFE); }
+.card-body { padding: 28px 24px 24px; text-align: center; }
+.card-badge {
+  display: inline-flex; align-items: center; gap: 5px;
+  background: #F8F6F2; padding: 5px 12px; border-radius: 16px;
+  font-size: 12px; font-weight: 600; color: #8C857A;
+  margin-bottom: 20px;
+}
+.card-emoji { font-size: 48px; margin-bottom: 18px; display: block; }
+.card-sentence {
+  font-size: 28px; font-weight: 900; color: #2D2A26;
+  margin-bottom: 8px; line-height: 1.3;
+}
+.card-romanize { font-size: 14px; color: #B5AFA7; margin-bottom: 4px; }
+.card-translate { font-size: 13px; color: #C4BEB6; margin-bottom: 24px; }
+
+.tts-btn {
+  display: inline-flex; align-items: center; gap: 8px;
+  background: #F0EDFF; padding: 12px 22px; border-radius: 12px;
+  font-size: 14px; font-weight: 700; color: #6C5CE7;
+  border: none;
+}
+
+/* Stacked card shadows */
+.card-stack { padding: 0 20px; margin-top: -2px; }
+.stack-1 { height: 6px; margin: 0 8px; background: #EFEBE5; border-radius: 0 0 16px 16px; }
+.stack-2 { height: 4px; margin: 0 16px; background: #E8E4DE; border-radius: 0 0 12px 12px; }
+
+/* Hint */
+.hint-section {
+  margin: 20px 20px 0; background: white; border-radius: 16px;
+  padding: 16px; border: 1px solid #F0ECE6;
+}
+.hint-title {
+  font-size: 13px; font-weight: 700; color: #2D2A26;
+  margin-bottom: 10px; display: flex; align-items: center; gap: 6px;
+}
+.hint-chips { display: flex; gap: 6px; flex-wrap: wrap; }
+.hint-chip {
+  padding: 6px 10px; border-radius: 8px;
+  background: #F8F6F2; font-size: 13px; font-weight: 600; color: #2D2A26;
+}
+.hint-chip .ipa { color: #6C5CE7; font-size: 11px; margin-left: 2px; }
+
+/* Record Sheet */
+.record-sheet {
+  position: fixed; bottom: 0; width: 390px;
+  background: white; border-radius: 22px 22px 0 0;
+  padding: 20px 20px 36px; text-align: center;
+  box-shadow: 0 -4px 20px rgba(0,0,0,0.05);
+}
+.record-label { font-size: 13px; color: #8C857A; margin-bottom: 16px; }
+.record-btn {
+  width: 64px; height: 64px; border-radius: 50%;
+  background: linear-gradient(135deg, #6C5CE7, #A29BFE);
+  border: none; display: inline-flex; align-items: center; justify-content: center;
+  box-shadow: 0 4px 18px rgba(108,92,231,0.35);
+}
+.record-hint { margin-top: 10px; font-size: 11px; color: #B5AFA7; }
+</style>
+</head>
+<body><div id="mobile-frame" style="width:390px;min-height:844px;margin:0;position:relative;overflow:hidden;background:#F8F6F2;">
+
+<div class="top-bar">
+  <div class="back-btn">
+    <svg width="20" height="20" viewBox="0 0 24 24" fill="none" stroke="#2D2A26" stroke-width="2.5"><path d="M15 18l-6-6 6-6"/></svg>
+  </div>
+  <div class="top-title">일상 문장</div>
+  <div class="card-counter">1 / 4</div>
+</div>
+
+<div class="progress-wrap">
+  <div class="progress-track"><div class="progress-fill"></div></div>
+</div>
+
+<div class="card-area">
+  <div class="the-card">
+    <div class="card-stripe"></div>
+    <div class="card-body">
+      <div class="card-badge">🚏 대중교통</div>
+      <span class="card-emoji">🚌</span>
+      <div class="card-sentence">어디서 내려요?</div>
+      <div class="card-romanize">eo-di-seo nae-ryeo-yo?</div>
+      <div class="card-translate">Где мне выходить?</div>
+      <button class="tts-btn">
+        <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" stroke-width="2"><polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5"/><path d="M15.54 8.46a5 5 0 0 1 0 7.07"/></svg>
+        예시 발음 듣기
+      </button>
+    </div>
+  </div>
+</div>
+<div class="card-stack">
+  <div class="stack-1"></div>
+  <div class="stack-2"></div>
+</div>
+
+<div class="hint-section">
+  <div class="hint-title">
+    <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="#6C5CE7" stroke-width="2"><circle cx="12" cy="12" r="10"/><path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3"/><line x1="12" y1="17" x2="12.01" y2="17"/></svg>
+    발음 힌트
+  </div>
+  <div class="hint-chips">
+    <div class="hint-chip">어 <span class="ipa">/ʌ/</span></div>
+    <div class="hint-chip">디 <span class="ipa">/di/</span></div>
+    <div class="hint-chip">서 <span class="ipa">/sʌ/</span></div>
+    <div class="hint-chip">내 <span class="ipa">/nɛ/</span></div>
+    <div class="hint-chip">려 <span class="ipa">/ɾjʌ/</span></div>
+    <div class="hint-chip">요 <span class="ipa">/jo/</span></div>
+  </div>
+</div>
+
+<div class="record-sheet">
+  <div class="record-label">버튼을 누르고 따라 말해보세요</div>
+  <button class="record-btn">
+    <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z"/><path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="white" stroke-width="2"/><line x1="12" y1="19" x2="12" y2="23" stroke="white" stroke-width="2"/></svg>
+  </button>
+  <div class="record-hint">탭하여 녹음 시작</div>
+</div>
+
+</div></body>
+</html>
