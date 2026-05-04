@@ -1,22 +1,35 @@
+import { useEffect, useRef } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCardStore } from '../stores/useCardStore';
+import { useHistoryStore } from '../stores/useHistoryStore';
 import TopNav from '../components/common/TopNav';
 import { LineChart, Line, XAxis, YAxis, CartesianGrid, ResponsiveContainer, Legend } from 'recharts';
 
 export default function ResultPage() {
   const navigate = useNavigate();
-  const { analysisResult, currentCard, nextCard, setAudioBlob, setAnalysisResult } = useCardStore();
+  const { analysisResult, currentCard, audioBlob, nextCard, setAudioBlob, setAnalysisResult } = useCardStore();
+  const recordAttempt = useHistoryStore((s) => s.recordAttempt);
+  const isFavorite = useHistoryStore((s) => s.isFavorite);
+  const toggleFavorite = useHistoryStore((s) => s.toggleFavorite);
+  const recordedRef = useRef(false);
 
-  if (!analysisResult || !currentCard) {
-    navigate('/');
-    return null;
-  }
+  useEffect(() => {
+    if (!analysisResult || !currentCard) {
+      navigate('/', { replace: true });
+      return;
+    }
+    if (recordedRef.current) return;
+    recordedRef.current = true;
+    recordAttempt(currentCard.id, analysisResult.score);
+  }, [analysisResult, currentCard, navigate, recordAttempt]);
+
+  if (!analysisResult || !currentCard) return null;
 
   const { score, phonemes, intonation, llmFeedback } = analysisResult;
   const correctCount = phonemes.filter((p) => p.correct).length;
 
-  const chartData = currentCard.korean.replace(/[?!.,]/g, '').split('').map((char, i) => ({
-    name: char,
+  const chartData = phonemes.map((p, i) => ({
+    name: p.char,
     native: intonation.referenceF0[i] ?? 0,
     user: intonation.userF0[i] ?? 0,
   }));
@@ -32,31 +45,65 @@ export default function ResultPage() {
     navigate('/learn');
   };
 
+  const handleDownload = () => {
+    if (!audioBlob) return;
+    const url = URL.createObjectURL(audioBlob);
+    const link = document.createElement('a');
+    link.href = url;
+    link.download = `malcard-${currentCard.id}-${Date.now()}.webm`;
+    document.body.appendChild(link);
+    link.click();
+    document.body.removeChild(link);
+    URL.revokeObjectURL(url);
+  };
+
+  const fav = isFavorite(currentCard.id);
+
   return (
     <div style={{ paddingBottom: 20 }}>
       <TopNav title="카드 결과" rightContent={
-        <button style={{
-          width: 40, height: 40, borderRadius: 12,
-          background: 'var(--color-surface)', display: 'flex', alignItems: 'center', justifyContent: 'center',
-          boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
-        }}>
+        <button
+          onClick={handleDownload}
+          aria-label="녹음 파일 다운로드"
+          disabled={!audioBlob}
+          style={{
+            width: 40, height: 40, borderRadius: 12,
+            background: 'var(--color-surface)',
+            display: 'flex', alignItems: 'center', justifyContent: 'center',
+            boxShadow: '0 1px 4px rgba(0,0,0,0.06)',
+            opacity: audioBlob ? 1 : 0.4,
+          }}
+        >
           <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="#2D2A26" strokeWidth="2">
-            <path d="M4 12v8a2 2 0 0 0 2 2h12a2 2 0 0 0 2-2v-8" />
-            <polyline points="16 6 12 2 8 6" />
-            <line x1="12" y1="2" x2="12" y2="15" />
+            <path d="M21 15v4a2 2 0 0 1-2 2H5a2 2 0 0 1-2-2v-4" />
+            <polyline points="7 10 12 15 17 10" />
+            <line x1="12" y1="15" x2="12" y2="3" />
           </svg>
         </button>
       } />
 
-      {/* Result Card */}
       <div style={{
         margin: '12px 20px', background: 'var(--color-surface)', borderRadius: 'var(--radius-2xl)',
         overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
       }}>
-        {/* Gradient top */}
         <div style={{
           background: 'var(--color-primary-gradient)', padding: 22, textAlign: 'center', color: 'white',
+          position: 'relative',
         }}>
+          <button
+            onClick={() => toggleFavorite(currentCard.id)}
+            aria-label={fav ? '즐겨찾기 해제' : '즐겨찾기 추가'}
+            style={{
+              position: 'absolute', top: 14, right: 14,
+              width: 32, height: 32, borderRadius: 10,
+              background: 'rgba(255,255,255,0.18)',
+              display: 'flex', alignItems: 'center', justifyContent: 'center',
+            }}
+          >
+            <svg width="16" height="16" viewBox="0 0 24 24" fill={fav ? 'white' : 'none'} stroke="white" strokeWidth="2">
+              <path d="M19 14c1.49-1.46 3-3.21 3-5.5A5.5 5.5 0 0 0 16.5 3c-1.76 0-3 .5-4.5 2-1.5-1.5-2.74-2-4.5-2A5.5 5.5 0 0 0 2 8.5c0 2.29 1.51 4.04 3 5.5l7 7Z" />
+            </svg>
+          </button>
           <div style={{ fontSize: 13, opacity: 0.85, marginBottom: 14 }}>"{currentCard.korean}"</div>
           <div style={{ width: 90, height: 90, margin: '0 auto 10px', position: 'relative' }}>
             <svg width="90" height="90" viewBox="0 0 90 90" style={{ transform: 'rotate(-90deg)' }}>
@@ -76,7 +123,6 @@ export default function ResultPage() {
           </div>
         </div>
 
-        {/* Card info */}
         <div style={{ padding: '16px 18px', display: 'flex', alignItems: 'center', gap: 10 }}>
           <span style={{ fontSize: 24 }}>{currentCard.emoji}</span>
           <div>
@@ -86,7 +132,6 @@ export default function ResultPage() {
         </div>
       </div>
 
-      {/* Phoneme Analysis */}
       <div style={{
         margin: '0 20px 12px', background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
         padding: 16, border: '1px solid var(--color-border)',
@@ -133,13 +178,12 @@ export default function ResultPage() {
               <circle cx="12" cy="12" r="10" /><line x1="15" y1="9" x2="9" y2="15" /><line x1="9" y1="9" x2="15" y2="15" />
             </svg>
             <span>
-              <strong>'{phonemes.find((p) => !p.correct)?.char}'</strong> 모음이 불명확합니다. <strong>/ɛ/</strong> 발음 시 입을 더 벌려보세요.
+              <strong>'{phonemes.find((p) => !p.correct)?.char}'</strong> 발음을 조금 더 또렷하게 해보세요. 입 모양과 혀 위치를 확인하면서 다시 한 번 따라 말해보세요.
             </span>
           </div>
         )}
       </div>
 
-      {/* Intonation Chart */}
       <div style={{
         margin: '0 20px 12px', background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
         padding: 16, border: '1px solid var(--color-border)',
@@ -177,11 +221,10 @@ export default function ResultPage() {
           <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2" style={{ flexShrink: 0, marginTop: 1 }}>
             <path d="M22 12h-4l-3 9L9 3l-3 9H2" />
           </svg>
-          <span>{intonation.feedback} "요?" 부분에서 목소리를 높이면 자연스러워요.</span>
+          <span>{intonation.feedback}</span>
         </div>
       </div>
 
-      {/* AI Feedback */}
       <div style={{
         margin: '0 20px 12px', background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
         padding: 16, border: '1px solid var(--color-border)',
@@ -209,7 +252,6 @@ export default function ResultPage() {
         </div>
       </div>
 
-      {/* Actions */}
       <div style={{ padding: '14px 20px', display: 'flex', gap: 10 }}>
         <button onClick={handleRetry} style={{
           flex: 1, padding: 14, borderRadius: 14, fontSize: 14, fontWeight: 800,

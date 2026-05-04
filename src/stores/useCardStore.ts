@@ -10,9 +10,9 @@ interface CardStore {
 
   // Learning
   currentCard: Card | null;
-  currentIndex: number;
   setCurrentCard: (card: Card) => void;
   nextCard: () => void;
+  currentPosition: () => { index: number; total: number };
 
   // Recording
   isRecording: boolean;
@@ -37,16 +37,25 @@ export const useCardStore = create<CardStore>((set, get) => ({
   },
 
   currentCard: null,
-  currentIndex: 0,
-  setCurrentCard: (card) => {
-    const index = cards.findIndex((c) => c.id === card.id);
-    set({ currentCard: card, currentIndex: index });
-  },
+  setCurrentCard: (card) => set({ currentCard: card }),
   nextCard: () => {
-    const { currentIndex, filteredCards } = get();
+    const { currentCard, filteredCards } = get();
     const filtered = filteredCards();
-    const nextIndex = (currentIndex + 1) % filtered.length;
-    set({ currentCard: filtered[nextIndex], currentIndex: nextIndex, analysisResult: null, audioBlob: null });
+    if (filtered.length === 0) return;
+    const idx = currentCard ? filtered.findIndex((c) => c.id === currentCard.id) : -1;
+    const nextIdx = idx >= 0 ? (idx + 1) % filtered.length : 0;
+    set({
+      currentCard: filtered[nextIdx],
+      analysisResult: null,
+      audioBlob: null,
+    });
+  },
+  currentPosition: () => {
+    const { currentCard, filteredCards } = get();
+    const filtered = filteredCards();
+    if (!currentCard || filtered.length === 0) return { index: 0, total: filtered.length };
+    const idx = filtered.findIndex((c) => c.id === currentCard.id);
+    return { index: idx >= 0 ? idx + 1 : 1, total: filtered.length };
   },
 
   isRecording: false,

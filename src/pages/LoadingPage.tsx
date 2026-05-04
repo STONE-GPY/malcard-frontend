@@ -1,6 +1,7 @@
 import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCardStore } from '../stores/useCardStore';
+import { analyzer } from '../lib/analyzer';
 import type { AnalysisStep } from '../types';
 
 const steps: { key: AnalysisStep; label: string; desc: string }[] = [
@@ -22,37 +23,48 @@ function getStepState(current: AnalysisStep, step: AnalysisStep) {
 
 export default function LoadingPage() {
   const navigate = useNavigate();
-  const { analysisStep, setAnalysisStep, setAnalysisResult } = useCardStore();
+  const {
+    analysisStep,
+    setAnalysisStep,
+    setAnalysisResult,
+    audioBlob,
+    currentCard,
+  } = useCardStore();
 
   useEffect(() => {
-    const timers = [
-      setTimeout(() => setAnalysisStep('phoneme'), 1500),
-      setTimeout(() => setAnalysisStep('intonation'), 4000),
-      setTimeout(() => setAnalysisStep('feedback'), 6500),
-      setTimeout(() => {
-        setAnalysisResult({
-          score: 84,
-          phonemes: [
-            { char: '어', ipa: '/ʌ/', correct: true },
-            { char: '디', ipa: '/di/', correct: true },
-            { char: '서', ipa: '/sʌ/', correct: true },
-            { char: '내', ipa: '/nɛ/', targetIpa: '/nɛ/', correct: false },
-            { char: '려', ipa: '/ɾjʌ/', correct: true },
-            { char: '요', ipa: '/jo/', correct: true },
-          ],
-          intonation: {
-            userF0: [180, 175, 170, 168, 165, 170],
-            referenceF0: [180, 175, 172, 168, 160, 140],
-            direction: 'rising',
-            feedback: '의문문이므로 문장 끝에서 억양을 더 올려주세요.',
-          },
-          llmFeedback: "전체적으로 잘했어요! 🎉 '내'의 모음 /ɛ/를 발음할 때 입을 옆으로 살짝 더 벌려보세요. 러시아어의 'э'와 비슷하지만 조금 더 열린 소리예요. 또한 의문문이니 끝을 올려주는 것도 잊지 마세요!",
-        });
-        navigate('/result');
-      }, 8500),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, [setAnalysisStep, setAnalysisResult, navigate]);
+    if (!currentCard || !audioBlob) {
+      navigate('/', { replace: true });
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+
+    setAnalysisStep('upload');
+
+    analyzer
+      .analyze(audioBlob, currentCard, {
+        onStep: (step) => {
+          if (!cancelled) setAnalysisStep(step);
+        },
+        signal: controller.signal,
+      })
+      .then((result) => {
+        if (cancelled) return;
+        setAnalysisResult(result);
+        navigate('/result', { replace: true });
+      })
+      .catch((err) => {
+        if ((err as DOMException)?.name === 'AbortError') return;
+        console.error('analyze failed', err);
+        navigate('/learn', { replace: true });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [audioBlob, currentCard, navigate, setAnalysisResult, setAnalysisStep]);
 
   return (
     <div style={{
@@ -61,7 +73,6 @@ export default function LoadingPage() {
     }}>
       {/* Card visual with stack */}
       <div style={{ width: 100, height: 130, margin: '0 auto 28px', position: 'relative' }}>
-        {/* Stack shadows */}
         <div style={{
           position: 'absolute', top: 3, left: 5, right: 5, bottom: -3,
           background: '#EFEBE5', borderRadius: 16, zIndex: 0,
@@ -70,7 +81,6 @@ export default function LoadingPage() {
           position: 'absolute', top: 6, left: 10, right: 10, bottom: -6,
           background: 'var(--color-muted)', borderRadius: 16, zIndex: 0,
         }} />
-        {/* Front card */}
         <div style={{
           width: '100%', height: '100%', background: 'var(--color-surface)', borderRadius: 16,
           boxShadow: '0 4px 16px rgba(108,92,231,0.12)',
@@ -93,7 +103,6 @@ export default function LoadingPage() {
         발음을 분석하고 피드백을 준비해요
       </div>
 
-      {/* Steps */}
       <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 300 }}>
         {steps.map((step) => {
           const state = getStepState(analysisStep, step.key);
@@ -145,9 +154,19 @@ export default function LoadingPage() {
         })}
       </div>
 
-      {/* Tip */}
+      <button
+        onClick={() => navigate('/learn', { replace: true })}
+        style={{
+          marginTop: 24, padding: '10px 18px', borderRadius: 12,
+          background: 'var(--color-surface)', border: '1px solid var(--color-border)',
+          fontSize: 12, fontWeight: 700, color: 'var(--color-text-secondary)',
+        }}
+      >
+        분석 취소
+      </button>
+
       <div style={{
-        marginTop: 32, padding: '14px 16px',
+        marginTop: 24, padding: '14px 16px',
         background: 'var(--color-surface)', borderRadius: 14, border: '1px solid var(--color-border)',
         display: 'flex', alignItems: 'flex-start', gap: 8, maxWidth: 300, width: '100%',
       }}>

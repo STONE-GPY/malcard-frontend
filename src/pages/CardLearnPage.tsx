@@ -1,13 +1,40 @@
+import { useEffect, useMemo, useRef, useState, useCallback } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCardStore } from '../stores/useCardStore';
 import TopNav from '../components/common/TopNav';
-import { useRef, useCallback } from 'react';
+import LevelMeter from '../components/common/LevelMeter';
+import { useRecorder } from '../hooks/useRecorder';
+
+const MAX_DURATION_MS = 12_000;
+const MIN_DURATION_MS = 800;
+
+function formatTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
 
 export default function CardLearnPage() {
   const navigate = useNavigate();
-  const { currentCard, isRecording, setIsRecording, setAudioBlob } = useCardStore();
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const { currentCard, setAudioBlob, currentPosition } = useCardStore();
+  const recorder = useRecorder({ maxDurationMs: MAX_DURATION_MS, minDurationMs: MIN_DURATION_MS });
+  const audioRef = useRef<HTMLAudioElement | null>(null);
+  const [isPlaying, setIsPlaying] = useState(false);
+
+  useEffect(() => {
+    if (!currentCard) navigate('/', { replace: true });
+  }, [currentCard, navigate]);
+
+  const previewUrl = useMemo(
+    () => (recorder.audioBlob ? URL.createObjectURL(recorder.audioBlob) : null),
+    [recorder.audioBlob],
+  );
+
+  useEffect(() => {
+    if (!previewUrl) return;
+    return () => URL.revokeObjectURL(previewUrl);
+  }, [previewUrl]);
 
   const handleTTS = useCallback(() => {
     if (!currentCard) return;
@@ -17,63 +44,63 @@ export default function CardLearnPage() {
     speechSynthesis.speak(utterance);
   }, [currentCard]);
 
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
-
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
-
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
-        stream.getTracks().forEach((t) => t.stop());
-        navigate('/loading');
-      };
-
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch {
-      alert('마이크 접근 권한이 필요합니다.');
+  const togglePlay = useCallback(() => {
+    const el = audioRef.current;
+    if (!el) return;
+    if (el.paused) {
+      el.play();
+      setIsPlaying(true);
+    } else {
+      el.pause();
+      setIsPlaying(false);
     }
-  }, [setIsRecording, setAudioBlob, navigate]);
+  }, []);
 
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }, [setIsRecording]);
+  const handleSubmit = useCallback(() => {
+    if (!recorder.audioBlob) return;
+    setAudioBlob(recorder.audioBlob);
+    navigate('/loading');
+  }, [recorder.audioBlob, setAudioBlob, navigate]);
 
-  if (!currentCard) {
-    navigate('/');
-    return null;
-  }
+  const handleRetry = useCallback(() => {
+    audioRef.current?.pause();
+    setIsPlaying(false);
+    recorder.reset();
+  }, [recorder]);
+
+  const position = useMemo(() => currentPosition(), [currentPosition]);
+  const progressPct = position.total > 0 ? (position.index / position.total) * 100 : 0;
+
+  if (!currentCard) return null;
+
+  const { status, durationMs, level, errorMessage } = recorder;
+  const tooShort = status === 'preview' && durationMs < MIN_DURATION_MS;
 
   return (
     <div>
       <TopNav title={currentCard.subcategory ?? '학습'} rightContent={
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-primary)' }}>1 / 4</span>
+        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-primary)' }}>
+          {position.index} / {position.total}
+        </span>
       } />
 
-      {/* Progress Bar */}
       <div style={{ padding: '4px 20px 20px' }}>
         <div style={{ height: 4, background: 'var(--color-muted)', borderRadius: 4, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: '25%', background: 'var(--color-primary)', borderRadius: 4 }} />
+          <div style={{
+            height: '100%',
+            width: `${progressPct}%`,
+            background: 'var(--color-primary)',
+            borderRadius: 4,
+            transition: 'width 200ms ease',
+          }} />
         </div>
       </div>
 
-      {/* The Card */}
       <div style={{ padding: '0 20px' }}>
         <div style={{
           background: 'var(--color-surface)', borderRadius: 'var(--radius-2xl)',
           overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
         }}>
-          {/* Gradient stripe */}
           <div style={{ height: 5, background: 'var(--color-primary-gradient)' }} />
 
           <div style={{ padding: '28px 24px 24px', textAlign: 'center' }}>
@@ -107,13 +134,11 @@ export default function CardLearnPage() {
         </div>
       </div>
 
-      {/* Card stack shadows */}
       <div style={{ padding: '0 20px', marginTop: -2 }}>
         <div style={{ height: 6, margin: '0 8px', background: '#EFEBE5', borderRadius: '0 0 16px 16px' }} />
         <div style={{ height: 4, margin: '0 16px', background: 'var(--color-muted)', borderRadius: '0 0 12px 12px' }} />
       </div>
 
-      {/* Phoneme Hints */}
       {currentCard.phonemeHints && (
         <div style={{
           margin: '20px 20px 0', background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
@@ -143,44 +168,267 @@ export default function CardLearnPage() {
         </div>
       )}
 
-      {/* Recording Section */}
+      {/* spacer for fixed bottom area */}
+      <div style={{ height: 220 }} />
+
       <div style={{
-        position: 'fixed', bottom: 0, width: '100%', maxWidth: 430,
+        position: 'fixed', bottom: 0, left: 0, right: 0, margin: '0 auto',
+        width: '100%', maxWidth: 430,
         background: 'var(--color-surface)', borderRadius: '22px 22px 0 0',
         padding: '20px 20px 36px', textAlign: 'center',
         boxShadow: '0 -4px 20px rgba(0,0,0,0.05)',
       }}>
-        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
-          {isRecording ? '녹음 중... 다시 눌러서 종료' : '버튼을 누르고 따라 말해보세요'}
-        </div>
+        {status === 'denied' && (
+          <PermissionDeniedView onRetry={() => recorder.start()} />
+        )}
 
+        {status === 'error' && (
+          <ErrorView message={errorMessage ?? '녹음을 시작할 수 없습니다.'} onRetry={() => recorder.start()} />
+        )}
+
+        {status === 'requesting' && (
+          <div style={{ padding: '12px 0', fontSize: 13, color: 'var(--color-text-secondary)' }}>
+            마이크를 준비하고 있어요...
+          </div>
+        )}
+
+        {status === 'recording' && (
+          <RecordingView
+            level={level}
+            durationMs={durationMs}
+            maxDurationMs={MAX_DURATION_MS}
+            onStop={recorder.stop}
+          />
+        )}
+
+        {status === 'preview' && previewUrl && (
+          <PreviewView
+            audioRef={audioRef}
+            url={previewUrl}
+            isPlaying={isPlaying}
+            durationMs={durationMs}
+            tooShort={tooShort}
+            onTogglePlay={togglePlay}
+            onEnded={() => setIsPlaying(false)}
+            onRetry={handleRetry}
+            onSubmit={handleSubmit}
+          />
+        )}
+
+        {status === 'idle' && (
+          <IdleView onStart={() => recorder.start()} />
+        )}
+      </div>
+    </div>
+  );
+}
+
+function IdleView({ onStart }: { onStart: () => void }) {
+  return (
+    <>
+      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
+        버튼을 누르고 따라 말해보세요
+      </div>
+      <button
+        onClick={onStart}
+        aria-label="녹음 시작"
+        style={{
+          width: 64, height: 64, borderRadius: '50%',
+          background: 'var(--color-primary-gradient)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 4px 18px rgba(108,92,231,0.35)',
+        }}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+          <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
+          <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="white" strokeWidth="2" />
+          <line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" />
+        </svg>
+      </button>
+      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+        탭하여 녹음 시작
+      </div>
+    </>
+  );
+}
+
+function RecordingView({
+  level, durationMs, maxDurationMs, onStop,
+}: {
+  level: number;
+  durationMs: number;
+  maxDurationMs: number;
+  onStop: () => void;
+}) {
+  const remaining = Math.max(0, maxDurationMs - durationMs);
+  return (
+    <>
+      <div style={{ marginBottom: 10 }}>
+        <LevelMeter level={level} active />
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 8,
+        fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 14,
+      }}>
+        <span style={{
+          display: 'inline-block', width: 8, height: 8, borderRadius: '50%',
+          background: 'var(--color-error)',
+          animation: 'pulse 1.2s infinite ease-in-out',
+        }} />
+        <span style={{ fontVariantNumeric: 'tabular-nums', fontWeight: 700 }}>
+          {formatTime(durationMs)}
+        </span>
+        <span style={{ color: 'var(--color-text-tertiary)' }}>
+          · 남은 시간 {formatTime(remaining)}
+        </span>
+      </div>
+      <button
+        onClick={onStop}
+        aria-label="녹음 종료"
+        style={{
+          width: 64, height: 64, borderRadius: '50%',
+          background: 'linear-gradient(135deg, #EF5350, #FF8A80)',
+          display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
+          boxShadow: '0 4px 18px rgba(239,83,80,0.35)',
+        }}
+      >
+        <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
+          <rect x="6" y="6" width="12" height="12" rx="2" />
+        </svg>
+      </button>
+      <div style={{ marginTop: 10, fontSize: 11, color: 'var(--color-text-tertiary)' }}>
+        탭하여 녹음 종료 · 잠시 멈추면 자동 종료
+      </div>
+    </>
+  );
+}
+
+function PreviewView({
+  audioRef, url, isPlaying, durationMs, tooShort,
+  onTogglePlay, onEnded, onRetry, onSubmit,
+}: {
+  audioRef: React.RefObject<HTMLAudioElement | null>;
+  url: string;
+  isPlaying: boolean;
+  durationMs: number;
+  tooShort: boolean;
+  onTogglePlay: () => void;
+  onEnded: () => void;
+  onRetry: () => void;
+  onSubmit: () => void;
+}) {
+  return (
+    <>
+      <audio ref={audioRef} src={url} onEnded={onEnded} preload="auto" />
+      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 12 }}>
+        녹음을 들어보고 분석을 시작하세요
+      </div>
+      <div style={{
+        display: 'flex', alignItems: 'center', justifyContent: 'center', gap: 12, marginBottom: 14,
+      }}>
         <button
-          onClick={isRecording ? stopRecording : startRecording}
+          onClick={onTogglePlay}
+          aria-label={isPlaying ? '재생 일시정지' : '녹음 재생'}
           style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: isRecording
-              ? 'linear-gradient(135deg, #EF5350, #FF8A80)'
-              : 'var(--color-primary-gradient)',
+            width: 56, height: 56, borderRadius: '50%',
+            background: 'var(--color-primary)',
             display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: isRecording
-              ? '0 4px 18px rgba(239,83,80,0.35)'
-              : '0 4px 18px rgba(108,92,231,0.35)',
+            boxShadow: '0 4px 14px rgba(108,92,231,0.3)',
           }}
         >
-          {isRecording ? (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
+          {isPlaying ? (
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+              <rect x="6" y="5" width="4" height="14" rx="1" />
+              <rect x="14" y="5" width="4" height="14" rx="1" />
+            </svg>
           ) : (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="white" strokeWidth="2" />
-              <line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" />
+            <svg width="22" height="22" viewBox="0 0 24 24" fill="white">
+              <polygon points="6 4 20 12 6 20 6 4" />
             </svg>
           )}
         </button>
-        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--color-text-tertiary)' }}>
-          {isRecording ? '탭하여 녹음 종료' : '탭하여 녹음 시작'}
+        <div style={{
+          fontVariantNumeric: 'tabular-nums', fontSize: 14, fontWeight: 700, color: '#2D2A26',
+        }}>
+          {formatTime(durationMs)}
         </div>
       </div>
-    </div>
+      {tooShort && (
+        <div style={{
+          fontSize: 11, color: 'var(--color-warning)', marginBottom: 10,
+        }}>
+          녹음이 너무 짧아요. 다시 녹음하는 것을 추천드려요.
+        </div>
+      )}
+      <div style={{ display: 'flex', gap: 10 }}>
+        <button
+          onClick={onRetry}
+          style={{
+            flex: 1, padding: 14, borderRadius: 14, fontSize: 14, fontWeight: 800,
+            background: 'var(--color-surface)', color: 'var(--color-primary)',
+            border: '2px solid var(--color-primary)',
+          }}
+        >
+          다시 녹음
+        </button>
+        <button
+          onClick={onSubmit}
+          style={{
+            flex: 1, padding: 14, borderRadius: 14, fontSize: 14, fontWeight: 800,
+            background: 'var(--color-primary-gradient)', color: 'white',
+            boxShadow: '0 4px 14px rgba(108,92,231,0.25)',
+          }}
+        >
+          분석하기
+        </button>
+      </div>
+    </>
+  );
+}
+
+function PermissionDeniedView({ onRetry }: { onRetry: () => void }) {
+  return (
+    <>
+      <div style={{ fontSize: 28, marginBottom: 6 }}>🎙️</div>
+      <div style={{ fontSize: 14, fontWeight: 800, color: '#2D2A26', marginBottom: 6 }}>
+        마이크 권한이 필요해요
+      </div>
+      <div style={{
+        fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 14, lineHeight: 1.5,
+      }}>
+        브라우저 주소창의 자물쇠 아이콘에서 마이크 접근을 허용한 뒤 다시 시도해주세요.
+      </div>
+      <button
+        onClick={onRetry}
+        style={{
+          padding: '12px 24px', borderRadius: 12, fontSize: 13, fontWeight: 800,
+          background: 'var(--color-primary)', color: 'white',
+        }}
+      >
+        다시 시도
+      </button>
+    </>
+  );
+}
+
+function ErrorView({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <>
+      <div style={{ fontSize: 14, fontWeight: 800, color: 'var(--color-error)', marginBottom: 6 }}>
+        녹음 오류
+      </div>
+      <div style={{ fontSize: 12, color: 'var(--color-text-secondary)', marginBottom: 14 }}>
+        {message}
+      </div>
+      <button
+        onClick={onRetry}
+        style={{
+          padding: '12px 24px', borderRadius: 12, fontSize: 13, fontWeight: 800,
+          background: 'var(--color-primary)', color: 'white',
+        }}
+      >
+        다시 시도
+      </button>
+    </>
   );
 }

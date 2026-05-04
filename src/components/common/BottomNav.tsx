@@ -1,6 +1,9 @@
+import type { ReactNode } from 'react';
 import { useLocation, useNavigate } from 'react-router-dom';
 
-const tabs = [
+type TabIcon = (active: boolean) => ReactNode;
+
+const tabs: { path: string; label: string; icon: TabIcon }[] = [
   {
     path: '/',
     label: '카드',
@@ -16,7 +19,7 @@ const tabs = [
   {
     path: '/learn',
     label: '연습',
-    icon: (_active: boolean) => (
+    icon: () => (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
         <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
@@ -26,7 +29,7 @@ const tabs = [
   {
     path: '/history',
     label: '기록',
-    icon: (_active: boolean) => (
+    icon: () => (
       <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
         <circle cx="12" cy="12" r="10" />
         <polyline points="12 6 12 12 16 14" />
