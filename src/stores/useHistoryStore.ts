@@ -15,10 +15,10 @@ export interface CardHistory {
 interface HistoryStore {
   history: Record<string, CardHistory>;
   favorites: string[];
-  recordAttempt: (cardId: string, score: number) => void;
-  toggleFavorite: (cardId: string) => void;
-  isFavorite: (cardId: string) => boolean;
-  getHistory: (cardId: string) => CardHistory | null;
+  recordAttempt: (cardId: string | number, score: number) => void;
+  toggleFavorite: (cardId: string | number) => void;
+  isFavorite: (cardId: string | number) => boolean;
+  getHistory: (cardId: string | number) => CardHistory | null;
   reviewQueueIds: (threshold?: number) => string[];
   clearAll: () => void;
 }
@@ -32,9 +32,10 @@ export const useHistoryStore = create<HistoryStore>()(
       favorites: [],
 
       recordAttempt: (cardId, score) => {
+        const key = String(cardId);
         const now = Date.now();
         set((state) => {
-          const prev = state.history[cardId];
+          const prev = state.history[key];
           const attempts = [
             ...(prev?.attempts ?? []),
             { score, attemptedAt: now },
@@ -43,23 +44,24 @@ export const useHistoryStore = create<HistoryStore>()(
           return {
             history: {
               ...state.history,
-              [cardId]: { attempts, bestScore, lastAttemptAt: now },
+              [key]: { attempts, bestScore, lastAttemptAt: now },
             },
           };
         });
       },
 
       toggleFavorite: (cardId) => {
+        const key = String(cardId);
         set((state) => ({
-          favorites: state.favorites.includes(cardId)
-            ? state.favorites.filter((id) => id !== cardId)
-            : [...state.favorites, cardId],
+          favorites: state.favorites.includes(key)
+            ? state.favorites.filter((id) => id !== key)
+            : [...state.favorites, key],
         }));
       },
 
-      isFavorite: (cardId) => get().favorites.includes(cardId),
+      isFavorite: (cardId) => get().favorites.includes(String(cardId)),
 
-      getHistory: (cardId) => get().history[cardId] ?? null,
+      getHistory: (cardId) => get().history[String(cardId)] ?? null,
 
       reviewQueueIds: (threshold = 70) => {
         const { history } = get();

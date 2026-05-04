@@ -1,50 +1,59 @@
 export type Difficulty = 'easy' | 'medium' | 'hard';
-export type CardCategory = 'daily' | 'idiom' | 'situation' | 'word';
+export type CardCategory = 'daily' | 'idioms' | 'situations' | 'words';
 
-export interface Card {
-  id: string;
-  korean: string;
-  romanize: string;
-  translation: string; // Russian translation
-  emoji: string;
-  category: CardCategory;
-  subcategory?: string;
-  difficulty: Difficulty;
-  phonemeHints?: PhonemeHint[];
-}
-
-export interface PhonemeHint {
-  char: string;
+export interface Phoneme {
+  ko: string;
   ipa: string;
 }
 
-export interface SituationGroup {
-  id: string;
-  title: string;
+export interface Card {
+  id: number;
   emoji: string;
-  cardCount: number;
-  color: 'indigo' | 'orange' | 'teal';
+  ko: string;
+  romanized: string;
+  ru: string;
+  category: CardCategory;
+  difficulty: Difficulty;
+  phonemes: Phoneme[];
+}
+
+export interface Deck {
+  id: string;
+  emoji: string;
+  title: string;
+  titleKo: string;
+  count: number;
+}
+
+export interface DifficultyMeta {
+  label: string;
+  color: string;
+  bg: string;
+  dot: string;
 }
 
 export interface PhonemeResult {
-  char: string;
-  ipa: string;
-  targetIpa?: string;
+  ko: string;
+  user: string;
+  target: string;
   correct: boolean;
+  note?: string;
 }
 
-export interface IntonationData {
-  userF0: number[];
-  referenceF0: number[];
-  direction: 'rising' | 'falling';
-  feedback: string;
+export interface IntonationPoint {
+  c: string;
+  native: number;
+  mine: number;
 }
 
 export interface AnalysisResult {
   score: number;
+  message: string;
+  messageEn: string;
   phonemes: PhonemeResult[];
-  intonation: IntonationData;
-  llmFeedback: string;
+  intonation: IntonationPoint[];
+  intonationWarning: string;
+  aiFeedback: string;
 }
 
 export type AnalysisStep = 'upload' | 'phoneme' | 'intonation' | 'feedback';

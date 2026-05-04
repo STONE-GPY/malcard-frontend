@@ -1,4 +1,5 @@
 import type { AnalysisResult, AnalysisStep, Card, PhonemeResult } from '../types';
+import { mockResultForDemo } from '../data/cards';
 
 export interface AnalyzeOptions {
   onStep?: (step: AnalysisStep) => void;
@@ -11,9 +12,9 @@ export interface Analyzer {
 
 const STEP_DELAYS: Record<AnalysisStep, number> = {
   upload: 0,
-  phoneme: 1500,
-  intonation: 2500,
-  feedback: 2500,
+  phoneme: 900,
+  intonation: 1100,
+  feedback: 1100,
 };
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
@@ -36,9 +37,7 @@ function wait(ms: number, signal?: AbortSignal): Promise<void> {
 
 function hashSeed(input: string): number {
   let hash = 0;
-  for (let i = 0; i < input.length; i++) {
-    hash = (hash * 31 + input.charCodeAt(i)) | 0;
-  }
+  for (let i = 0; i < input.length; i++) hash = (hash * 31 + input.charCodeAt(i)) | 0;
   return Math.abs(hash);
 }
 
@@ -51,36 +50,23 @@ function pseudoRandom(seed: number): () => number {
 }
 
 function buildPhonemes(card: Card, rand: () => number): PhonemeResult[] {
-  const hints = card.phonemeHints;
-  if (hints && hints.length > 0) {
-    return hints.map((h) => ({
-      char: h.char,
-      ipa: h.ipa,
-      correct: rand() > 0.18,
-      targetIpa: h.ipa,
-    }));
-  }
-  const chars = card.korean.replace(/[?!.,\s]/g, '').split('');
-  return chars.map((char) => ({
-    char,
-    ipa: '/?/',
+  return card.phonemes.map((p) => ({
+    ko: p.ko,
+    user: p.ipa,
+    target: p.ipa,
     correct: rand() > 0.18,
   }));
 }
 
-function buildIntonation(length: number, rand: () => number) {
-  const base = 165 + Math.floor(rand() * 20);
-  const referenceF0 = Array.from({ length }, (_, i) => {
-    const t = i / Math.max(length - 1, 1);
-    return Math.round(base + Math.sin(t * Math.PI) * 18 - t * 25);
+function buildIntonation(phonemes: PhonemeResult[], rand: () => number) {
+  const len = phonemes.length;
+  const base = 60 + Math.floor(rand() * 8);
+  return phonemes.map((p, i) => {
+    const t = i / Math.max(len - 1, 1);
+    const native = Math.round(base + t * 28 + Math.sin(t * Math.PI) * 6);
+    const mine = native + Math.round((rand() - 0.6) * 12);
+    return { c: p.ko, native, mine };
   });
-  const userF0 = referenceF0.map((v) => v + Math.round((rand() - 0.5) * 18));
-  return {
-    userF0,
-    referenceF0,
-    direction: 'rising' as const,
-    feedback: '의문문이므로 문장 끝에서 억양을 더 올려주세요.',
-  };
 }
 
 function buildScore(phonemes: PhonemeResult[]): number {
@@ -92,14 +78,14 @@ function buildScore(phonemes: PhonemeResult[]): number {
 function buildFeedback(card: Card, phonemes: PhonemeResult[]): string {
   const wrong = phonemes.find((p) => !p.correct);
   if (!wrong) {
-    return `완벽해요! 🎉 "${card.korean}" 발음이 자연스러워요. 같은 호흡으로 다른 카드도 도전해보세요.`;
+    return `완벽해요! 🎉 "${card.ko}" 발음이 자연스러워요. 같은 호흡으로 다른 카드도 도전해보세요.`;
   }
-  return `전체적으로 잘했어요! 🎉 '${wrong.char}'의 발음을 조금 더 또렷하게 해보세요. 입 모양과 혀 위치를 확인하면서 다시 한 번 따라 말해보세요.`;
+  return `전체적으로 잘했어요! '${wrong.ko}' 발음을 조금 더 또렷하게 해보세요. 입 모양과 혀 위치를 확인하면서 다시 한 번 따라 말해보세요.`;
 }
 
 export const mockAnalyzer: Analyzer = {
   async analyze(_audio, card, { onStep, signal } = {}) {
-    const rand = pseudoRandom(hashSeed(card.id + Date.now().toString()));
+    const rand = pseudoRandom(hashSeed(`${card.id}-${Date.now()}`));
 
     onStep?.('upload');
     await wait(STEP_DELAYS.phoneme, signal);
@@ -109,14 +95,36 @@ export const mockAnalyzer: Analyzer = {
     await wait(STEP_DELAYS.intonation, signal);
 
     onStep?.('intonation');
-    const intonation = buildIntonation(phonemes.length, rand);
+    const intonation = buildIntonation(phonemes, rand);
     await wait(STEP_DELAYS.feedback, signal);
 
     onStep?.('feedback');
     const score = buildScore(phonemes);
-    const llmFeedback = buildFeedback(card, phonemes);
+    const aiFeedback = buildFeedback(card, phonemes);
+    const wrong = phonemes.find((p) => !p.correct);
 
-    return { score, phonemes, intonation, llmFeedback };
+    return {
+      score,
+      message: score >= 80 ? '잘했어요!' : score >= 60 ? '조금만 더!' : '다시 도전!',
+      messageEn: score >= 80 ? 'Great job!' : 'Keep going!',
+      phonemes,
+      intonation,
+      intonationWarning: wrong ? '문장 끝 억양이 부족해요' : '억양이 자연스러워요',
+      aiFeedback,
+    };
+  },
+};
+
+export const demoAnalyzer: Analyzer = {
+  async analyze(_audio, _card, { onStep, signal } = {}) {
+    onStep?.('upload');
+    await wait(STEP_DELAYS.phoneme, signal);
+    onStep?.('phoneme');
+    await wait(STEP_DELAYS.intonation, signal);
+    onStep?.('intonation');
+    await wait(STEP_DELAYS.feedback, signal);
+    onStep?.('feedback');
+    return mockResultForDemo;
   },
 };
 

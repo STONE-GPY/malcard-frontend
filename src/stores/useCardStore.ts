@@ -3,24 +3,20 @@ import type { Card, CardCategory, AnalysisResult, AnalysisStep } from '../types'
 import { cards } from '../data/cards';
 
 interface CardStore {
-  // Card selection
   selectedCategory: CardCategory | 'all';
   setCategory: (category: CardCategory | 'all') => void;
   filteredCards: () => Card[];
 
-  // Learning
   currentCard: Card | null;
   setCurrentCard: (card: Card) => void;
   nextCard: () => void;
   currentPosition: () => { index: number; total: number };
 
-  // Recording
   isRecording: boolean;
   setIsRecording: (recording: boolean) => void;
   audioBlob: Blob | null;
   setAudioBlob: (blob: Blob | null) => void;
 
-  // Analysis
   analysisStep: AnalysisStep;
   setAnalysisStep: (step: AnalysisStep) => void;
   analysisResult: AnalysisResult | null;
