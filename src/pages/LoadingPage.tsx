@@ -5,6 +5,7 @@ import { analyzer } from '../lib/analyzer';
 import { tokens } from '../theme/tokens';
 import { tips } from '../data/cards';
 import { IconCheck, IconSparkle } from '../components/icons';
+import { ApiError } from '../api/client';
 import type { AnalysisStep } from '../types';
 
 const STEP_ORDER: AnalysisStep[] = ['upload', 'phoneme', 'intonation', 'feedback'];
@@ -12,8 +13,14 @@ const STEP_LABELS = ['음성 업로드 완료', '음소 분석 중', '억양 추
 
 export default function LoadingPage() {
   const navigate = useNavigate();
-  const { analysisStep, setAnalysisStep, setAnalysisResult, audioBlob, currentCard } =
-    useCardStore();
+  const {
+    analysisStep,
+    setAnalysisStep,
+    setAnalysisResult,
+    setAnalysisError,
+    audioBlob,
+    currentCard,
+  } = useCardStore();
 
   const [tip] = useState(() => tips[Math.floor(Math.random() * tips.length)]);
 
@@ -26,6 +33,7 @@ export default function LoadingPage() {
     const controller = new AbortController();
     let cancelled = false;
     setAnalysisStep('upload');
+    setAnalysisError(null);
 
     analyzer
       .analyze(audioBlob, currentCard, {
@@ -41,15 +49,23 @@ export default function LoadingPage() {
       })
       .catch((err) => {
         if ((err as DOMException)?.name === 'AbortError') return;
-        console.error('analyze failed', err);
-        navigate('/learn', { replace: true });
+        if (cancelled) return;
+        if (err instanceof ApiError) {
+          setAnalysisError({ code: err.code, message: err.message });
+        } else {
+          setAnalysisError({
+            code: 'PIPELINE_ERROR',
+            message: (err as Error).message ?? '분석 중 오류가 발생했어요.',
+          });
+        }
+        navigate('/result', { replace: true });
       });
 
     return () => {
       cancelled = true;
       controller.abort();
     };
-  }, [audioBlob, currentCard, navigate, setAnalysisResult, setAnalysisStep]);
+  }, [audioBlob, currentCard, navigate, setAnalysisError, setAnalysisResult, setAnalysisStep]);
 
   const currentIdx = STEP_ORDER.indexOf(analysisStep);
   const stepStatus = (i: number) =>
@@ -57,6 +73,7 @@ export default function LoadingPage() {
 
   return (
     <div
+      data-testid="loading-page"
       style={{
         minHeight: '100%',
         background: tokens.bgGrad,

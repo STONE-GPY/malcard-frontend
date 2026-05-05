@@ -1,12 +1,48 @@
-import type { Card, CardCategory, Deck, DifficultyMeta, Difficulty, AnalysisResult } from '../types';
+import type { Card, CategoryId, AnalysisResult, EvaluationStatus } from '../types';
 
-export const categories: { id: CardCategory | 'all'; label: string; labelEn: string }[] = [
-  { id: 'all', label: '전체', labelEn: 'All' },
-  { id: 'daily', label: '일상', labelEn: 'Daily' },
-  { id: 'idioms', label: '관용구', labelEn: 'Idioms' },
-  { id: 'situations', label: '상황', labelEn: 'Situations' },
-  { id: 'words', label: '단어', labelEn: 'Words' },
+// Frontend filter chips. apiType is sent as the `type` query param to /cards.
+export interface CategoryDef {
+  id: CategoryId;
+  label: string;
+  apiType?: string; // backend `type` filter value
+}
+
+export const categories: CategoryDef[] = [
+  { id: 'all', label: '전체' },
+  { id: 'daily', label: '일상', apiType: '일상문장' },
+  { id: 'idioms', label: '관용구', apiType: '관용구' },
+  { id: 'situations', label: '상황', apiType: '상황별' },
+  { id: 'words', label: '단어', apiType: '단어' },
 ];
+
+// Map between backend type string ↔ frontend filter id
+export function categoryIdForType(type: string): Exclude<CategoryId, 'all'> {
+  const found = categories.find((c) => c.apiType === type);
+  return (found?.id ?? 'daily') as Exclude<CategoryId, 'all'>;
+}
+
+export function emojiForType(type: string): string {
+  switch (type) {
+    case '일상문장':
+      return '💬';
+    case '관용구':
+      return '🐯';
+    case '상황별':
+      return '🎯';
+    case '단어':
+      return '📚';
+    default:
+      return '📝';
+  }
+}
+
+export interface Deck {
+  id: string;
+  emoji: string;
+  title: string;
+  titleKo: string;
+  count: number;
+}
 
 export const decks: Deck[] = [
   { id: 'hospital', emoji: '🏥', title: '병원', titleKo: 'Hospital', count: 24 },
@@ -15,14 +51,80 @@ export const decks: Deck[] = [
   { id: 'shopping', emoji: '🛍️', title: '쇼핑', titleKo: 'Shopping', count: 21 },
 ];
 
-export const cards: Card[] = [
+// Mock cards in the BACKEND schema (so the mock client returns the same shape as the API)
+export const mockBackendCards: Omit<Card, keyof Pick<Card, 'emoji' | 'romanized' | 'difficulty' | 'phonemes'>>[] = [
   {
-    id: 1,
+    id: 'life_01',
+    type: '일상문장',
+    korean: '안녕하세요',
+    russian: 'Здравствуйте',
+    prompt_question: '정중한 인사 표현입니다.',
+    phoneme_focus: '받침',
+  },
+  {
+    id: 'life_02',
+    type: '일상문장',
+    korean: '감사합니다',
+    russian: 'Спасибо',
+    prompt_question: '감사 인사 표현입니다.',
+    phoneme_focus: '받침',
+  },
+  {
+    id: 'life_03',
+    type: '일상문장',
+    korean: '밥 먹었어요?',
+    russian: 'Ты поел?',
+    prompt_question: '식사하셨어요? (안부 인사)',
+  },
+  {
+    id: 'sit_01',
+    type: '상황별',
+    korean: '어디가 아프세요?',
+    russian: 'Где у вас болит?',
+    prompt_question: '병원에서 환자에게 묻는 말이에요.',
+    phoneme_focus: '격음',
+  },
+  {
+    id: 'word_01',
+    type: '단어',
+    korean: '비가 와요',
+    russian: 'Идёт дождь',
+    prompt_question: '비가 내리고 있어요.',
+  },
+  {
+    id: 'idi_01',
+    type: '관용구',
+    korean: '호랑이도 제 말 하면 온다',
+    russian: 'Лёгок на помине',
+    prompt_question: '말하면 나타난다는 속담이에요.',
+  },
+  {
+    id: 'sit_02',
+    type: '상황별',
+    korean: '커피 한 잔 주세요',
+    russian: 'Один кофе, пожалуйста',
+    prompt_question: '카페에서 주문하기.',
+    phoneme_focus: '격음',
+  },
+  {
+    id: 'word_02',
+    type: '단어',
+    korean: '공부',
+    russian: 'Учёба',
+    prompt_question: '학습 · 공부하다.',
+  },
+];
+
+// Optional UI extras keyed by card id (not from backend)
+export const cardUiExtras: Record<string, {
+  emoji?: string;
+  romanized?: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  phonemes?: { ko: string; ipa: string }[];
+}> = {
+  life_01: {
     emoji: '👋',
-    ko: '안녕하세요',
     romanized: 'annyeonghaseyo',
-    ru: '안녕하세요 (정중한 인사)',
-    category: 'daily',
     difficulty: 'easy',
     phonemes: [
       { ko: '안', ipa: '/an/' },
@@ -32,13 +134,9 @@ export const cards: Card[] = [
       { ko: '요', ipa: '/jo/' },
     ],
   },
-  {
-    id: 2,
+  life_02: {
     emoji: '🙏',
-    ko: '감사합니다',
     romanized: 'gamsahamnida',
-    ru: '감사 인사 표현',
-    category: 'daily',
     difficulty: 'easy',
     phonemes: [
       { ko: '감', ipa: '/kam/' },
@@ -48,13 +146,9 @@ export const cards: Card[] = [
       { ko: '다', ipa: '/da/' },
     ],
   },
-  {
-    id: 3,
+  life_03: {
     emoji: '🍚',
-    ko: '밥 먹었어요?',
     romanized: 'bap meogeosseoyo?',
-    ru: '식사하셨어요? (안부 인사)',
-    category: 'daily',
     difficulty: 'medium',
     phonemes: [
       { ko: '밥', ipa: '/pap/' },
@@ -64,13 +158,9 @@ export const cards: Card[] = [
       { ko: '요', ipa: '/jo/' },
     ],
   },
-  {
-    id: 4,
+  sit_01: {
     emoji: '💊',
-    ko: '어디가 아프세요?',
     romanized: 'eodiga apeuseyo?',
-    ru: '어느 부위가 아프신가요?',
-    category: 'situations',
     difficulty: 'hard',
     phonemes: [
       { ko: '어', ipa: '/ʌ/' },
@@ -82,13 +172,9 @@ export const cards: Card[] = [
       { ko: '요', ipa: '/jo/' },
     ],
   },
-  {
-    id: 5,
+  word_01: {
     emoji: '🌧️',
-    ko: '비가 와요',
     romanized: 'biga wayo',
-    ru: '비가 내리고 있어요',
-    category: 'words',
     difficulty: 'easy',
     phonemes: [
       { ko: '비', ipa: '/pi/' },
@@ -97,27 +183,14 @@ export const cards: Card[] = [
       { ko: '요', ipa: '/jo/' },
     ],
   },
-  {
-    id: 6,
+  idi_01: {
     emoji: '🐯',
-    ko: '호랑이도 제 말 하면 온다',
     romanized: 'horangi-do je mal hamyeon onda',
-    ru: '말하면 나타난다는 속담',
-    category: 'idioms',
     difficulty: 'hard',
-    phonemes: [
-      { ko: '호', ipa: '/ho/' },
-      { ko: '랑', ipa: '/raŋ/' },
-      { ko: '이', ipa: '/i/' },
-    ],
   },
-  {
-    id: 7,
+  sit_02: {
     emoji: '☕',
-    ko: '커피 한 잔 주세요',
     romanized: 'keopi han jan juseyo',
-    ru: '카페에서 주문하기',
-    category: 'situations',
     difficulty: 'medium',
     phonemes: [
       { ko: '커', ipa: '/kʰʌ/' },
@@ -126,22 +199,25 @@ export const cards: Card[] = [
       { ko: '잔', ipa: '/tɕan/' },
     ],
   },
-  {
-    id: 8,
+  word_02: {
     emoji: '📚',
-    ko: '공부',
     romanized: 'gongbu',
-    ru: '학습 · 공부하다',
-    category: 'words',
     difficulty: 'easy',
     phonemes: [
       { ko: '공', ipa: '/koŋ/' },
       { ko: '부', ipa: '/pu/' },
     ],
   },
-];
+};
 
-export const difficultyMeta: Record<Difficulty, DifficultyMeta> = {
+export interface DifficultyMeta {
+  label: string;
+  color: string;
+  bg: string;
+  dot: string;
+}
+
+export const difficultyMeta: Record<NonNullable<Card['difficulty']>, DifficultyMeta> = {
   easy: { label: '쉬움', color: '#10B981', bg: '#ECFDF5', dot: '#10B981' },
   medium: { label: '보통', color: '#F59E0B', bg: '#FFFBEB', dot: '#F59E0B' },
   hard: { label: '어려움', color: '#EF4444', bg: '#FEF2F2', dot: '#EF4444' },
@@ -155,9 +231,9 @@ export const tips: string[] = [
 ];
 
 export const mockResultForDemo: AnalysisResult = {
+  status: 'ready' as EvaluationStatus,
   score: 84,
   message: '잘했어요!',
-  messageEn: 'Great job!',
   phonemes: [
     { ko: '어', user: '/ʌ/', target: '/ʌ/', correct: true },
     { ko: '디', user: '/di/', target: '/di/', correct: true },
@@ -178,7 +254,8 @@ export const mockResultForDemo: AnalysisResult = {
   ],
   intonationWarning: '문장 끝 억양이 부족해요',
   aiFeedback:
-    '전체적으로 발음이 깨끗했어요 — 모음을 정확하게 잘 내고 있습니다. 다만 ㅍ 발음에 주의해 주세요. 격음이라 살짝 숨을 더 내뱉어야 합니다. 그리고 의문문에서는 마지막 음절 «요»에서 음을 살짝 올려주면 훨씬 자연스럽게 들려요.',
+    '전체적으로 발음이 깨끗했어요 — 모음을 정확하게 잘 내고 있습니다. 다만 ㅍ 발음에 주의해 주세요.',
+  prosodyExecuted: true,
 };
 
 export interface HistorySession {

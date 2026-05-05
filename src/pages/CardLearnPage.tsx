@@ -4,9 +4,17 @@ import { useCardStore } from '../stores/useCardStore';
 import { useRecorder } from '../hooks/useRecorder';
 import { tokens } from '../theme/tokens';
 import { IconArrowLeft, IconMic, IconStop, IconVolume } from '../components/icons';
+import { categoryIdForType } from '../data/cards';
 
 const MAX_DURATION_MS = 12_000;
 const MIN_DURATION_MS = 800;
+
+const TYPE_LABEL: Record<string, string> = {
+  '일상문장': '일상',
+  '관용구': '관용구',
+  '상황별': '상황',
+  '단어': '단어',
+};
 
 export default function CardLearnPage() {
   const navigate = useNavigate();
@@ -17,7 +25,7 @@ export default function CardLearnPage() {
     if (!currentCard) navigate('/', { replace: true });
   }, [currentCard, navigate]);
 
-  // Auto-submit when recording produces a blob (no preview screen in design)
+  // Auto-submit when recording produces a blob
   useEffect(() => {
     if (recorder.status === 'preview' && recorder.audioBlob) {
       setAudioBlob(recorder.audioBlob);
@@ -27,7 +35,7 @@ export default function CardLearnPage() {
 
   const handleTTS = useCallback(() => {
     if (!currentCard) return;
-    const utterance = new SpeechSynthesisUtterance(currentCard.ko);
+    const utterance = new SpeechSynthesisUtterance(currentCard.korean);
     utterance.lang = 'ko-KR';
     utterance.rate = 0.8;
     speechSynthesis.speak(utterance);
@@ -47,8 +55,14 @@ export default function CardLearnPage() {
   const denied = recorder.status === 'denied';
   const errored = recorder.status === 'error';
 
+  // Resolve category id from backend type
+  const _categoryId = categoryIdForType(currentCard.type);
+  void _categoryId;
+  const typeLabel = TYPE_LABEL[currentCard.type] ?? currentCard.type;
+
   return (
     <div
+      data-testid="learn-page"
       style={{
         minHeight: '100%',
         background: tokens.bgGrad,
@@ -86,13 +100,7 @@ export default function CardLearnPage() {
             <IconArrowLeft size={20} />
           </button>
           <div style={{ fontSize: 15, fontWeight: 600, color: '#0F172A', letterSpacing: -0.2 }}>
-            {currentCard.category === 'situations'
-              ? '상황'
-              : currentCard.category === 'idioms'
-                ? '관용구'
-                : currentCard.category === 'words'
-                  ? '단어'
-                  : '일상'}
+            {typeLabel}
           </div>
           <div style={{ fontSize: 13, color: '#64748B', fontWeight: 500 }}>
             {position.index} / {position.total}
@@ -118,7 +126,6 @@ export default function CardLearnPage() {
         </div>
       </div>
 
-      {/* Flashcard */}
       <div
         style={{
           margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
@@ -147,7 +154,7 @@ export default function CardLearnPage() {
             filter: `drop-shadow(0 6px 12px ${tokens.primaryShadowSoft})`,
           }}
         >
-          {currentCard.emoji}
+          {currentCard.emoji ?? '📝'}
         </div>
         <h2
           style={{
@@ -160,23 +167,30 @@ export default function CardLearnPage() {
             margin: 0,
           }}
         >
-          {currentCard.ko}
+          {currentCard.korean}
         </h2>
-        <div
-          style={{
-            fontSize: 15,
-            color: tokens.primaryDark,
-            fontStyle: 'italic',
-            marginTop: 8,
-            fontWeight: 500,
-            letterSpacing: 0.1,
-          }}
-        >
-          {currentCard.romanized}
-        </div>
+        {currentCard.romanized && (
+          <div
+            style={{
+              fontSize: 15,
+              color: tokens.primaryDark,
+              fontStyle: 'italic',
+              marginTop: 8,
+              fontWeight: 500,
+              letterSpacing: 0.1,
+            }}
+          >
+            {currentCard.romanized}
+          </div>
+        )}
         <div style={{ fontSize: 16, color: '#475569', marginTop: 14, fontWeight: 500 }}>
-          {currentCard.ru}
+          {currentCard.russian}
         </div>
+        {currentCard.prompt_question && (
+          <div style={{ fontSize: 13, color: '#94A3B8', marginTop: 6 }}>
+            {currentCard.prompt_question}
+          </div>
+        )}
         <button
           onClick={handleTTS}
           style={{
@@ -197,62 +211,62 @@ export default function CardLearnPage() {
         </button>
       </div>
 
-      {/* Phoneme hints */}
-      <div
-        style={{
-          margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
-          padding: 18,
-          background: '#FFFFFF',
-          borderRadius: tokens.radiusLg,
-          border: '1px solid rgba(15,23,42,0.05)',
-        }}
-      >
+      {currentCard.phonemes && currentCard.phonemes.length > 0 && (
         <div
           style={{
-            fontSize: 12,
-            fontWeight: 700,
-            letterSpacing: 1.2,
-            textTransform: 'uppercase',
-            color: '#94A3B8',
-            marginBottom: 12,
+            margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
+            padding: 18,
+            background: '#FFFFFF',
+            borderRadius: tokens.radiusLg,
+            border: '1px solid rgba(15,23,42,0.05)',
           }}
         >
-          발음 힌트
-        </div>
-        <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-          {currentCard.phonemes.map((p, i) => (
-            <div
-              key={i}
-              style={{
-                display: 'inline-flex',
-                alignItems: 'center',
-                gap: 6,
-                padding: '7px 12px',
-                borderRadius: 999,
-                background: '#F8FAFC',
-                border: '1px solid #E2E8F0',
-                fontSize: 13,
-              }}
-            >
-              <span
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              color: '#94A3B8',
+              marginBottom: 12,
+            }}
+          >
+            발음 힌트
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {currentCard.phonemes.map((p, i) => (
+              <div
+                key={i}
                 style={{
-                  fontFamily: '"Noto Sans KR", system-ui',
-                  fontSize: 14,
-                  fontWeight: 600,
-                  color: '#0F172A',
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '7px 12px',
+                  borderRadius: 999,
+                  background: '#F8FAFC',
+                  border: '1px solid #E2E8F0',
+                  fontSize: 13,
                 }}
               >
-                {p.ko}
-              </span>
-              <span style={{ color: tokens.primaryDark, fontSize: 12, fontWeight: 500 }}>
-                {p.ipa}
-              </span>
-            </div>
-          ))}
+                <span
+                  style={{
+                    fontFamily: '"Noto Sans KR", system-ui',
+                    fontSize: 14,
+                    fontWeight: 600,
+                    color: '#0F172A',
+                  }}
+                >
+                  {p.ko}
+                </span>
+                <span style={{ color: tokens.primaryDark, fontSize: 12, fontWeight: 500 }}>
+                  {p.ipa}
+                </span>
+              </div>
+            ))}
+          </div>
         </div>
-      </div>
+      )}
 
-      {/* Record dock */}
       <div
         style={{
           position: 'sticky',
@@ -275,11 +289,7 @@ export default function CardLearnPage() {
           style={{
             fontSize: 14,
             fontWeight: 600,
-            color: denied || errored
-              ? '#EF4444'
-              : recording
-                ? '#EF4444'
-                : '#475569',
+            color: denied || errored ? '#EF4444' : recording ? '#EF4444' : '#475569',
             marginBottom: 14,
             letterSpacing: -0.1,
             textAlign: 'center',
@@ -296,6 +306,7 @@ export default function CardLearnPage() {
 
         {recording && (
           <div
+            data-testid="recording-wave"
             style={{
               display: 'flex',
               alignItems: 'center',
@@ -321,7 +332,6 @@ export default function CardLearnPage() {
 
         <button
           onClick={toggleRecord}
-          className={recording ? 'mc-fab-pulse' : ''}
           aria-label={recording ? '정지' : '녹음 시작'}
           style={{
             width: tokens.fab,
@@ -337,7 +347,6 @@ export default function CardLearnPage() {
             boxShadow: recording
               ? '0 12px 28px -4px rgba(239,68,68,0.55)'
               : `0 12px 28px -4px ${tokens.primaryShadow}, 0 4px 12px -2px ${tokens.primaryShadowSoft}`,
-            transition: 'all 0.25s ease',
             animation: recording ? 'mc-pulse 1.4s infinite' : 'none',
           }}
         >

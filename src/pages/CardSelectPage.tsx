@@ -1,15 +1,23 @@
+import { useEffect } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useCardStore } from '../stores/useCardStore';
 import { categories, decks, difficultyMeta } from '../data/cards';
 import BottomNav from '../components/common/BottomNav';
 import { IconChevronRight, IconFlame } from '../components/icons';
 import { tokens } from '../theme/tokens';
-import type { Card, CardCategory } from '../types';
+import { useCards } from '../hooks/useCards';
+import { userMessageFor } from '../api/client';
+import type { Card, CategoryId } from '../types';
 
 export default function CardSelectPage() {
   const navigate = useNavigate();
-  const { selectedCategory, setCategory, filteredCards, setCurrentCard } = useCardStore();
-  const cards = filteredCards();
+  const { selectedCategory, setCategory, setCurrentCard, setCardList } = useCardStore();
+  const { cards, loading, error, reload } = useCards(selectedCategory);
+
+  useEffect(() => {
+    setCardList(cards);
+  }, [cards, setCardList]);
+
   const showDecks = selectedCategory === 'all' || selectedCategory === 'situations';
 
   const handleCardClick = (card: Card) => {
@@ -18,10 +26,9 @@ export default function CardSelectPage() {
   };
 
   const handleDeckClick = () => {
-    // Deck demo: pick the hospital example card
-    const demoCard = cards.find((c) => c.id === 4) ?? cards[0];
-    if (demoCard) {
-      setCurrentCard(demoCard);
+    const demo = cards.find((c) => c.id === 'sit_01') ?? cards[0];
+    if (demo) {
+      setCurrentCard(demo);
       navigate('/learn');
     }
   };
@@ -96,7 +103,7 @@ export default function CardSelectPage() {
           return (
             <button
               key={cat.id}
-              onClick={() => setCategory(cat.id as CardCategory | 'all')}
+              onClick={() => setCategory(cat.id as CategoryId)}
               style={{
                 flexShrink: 0,
                 padding: '10px 18px',
@@ -110,7 +117,6 @@ export default function CardSelectPage() {
                 boxShadow: active
                   ? `0 6px 16px -4px ${tokens.primaryShadow}`
                   : '0 1px 2px rgba(15,23,42,0.04)',
-                transition: 'all 0.18s ease',
                 whiteSpace: 'nowrap',
               }}
             >
@@ -149,7 +155,6 @@ export default function CardSelectPage() {
                   display: 'flex',
                   flexDirection: 'column',
                   justifyContent: 'space-between',
-                  border: 'none',
                 }}
               >
                 <div
@@ -211,96 +216,109 @@ export default function CardSelectPage() {
       <SectionLabel>
         {showDecks ? '전체 카드' : '카드 목록'} · {cards.length}
       </SectionLabel>
+
       <div
         style={{
           padding: `4px ${tokens.pad}px 20px`,
           display: 'flex',
           flexDirection: 'column',
-          gap: tokens.listGap,
+          gap: 8,
         }}
       >
-        {cards.map((card) => {
-          const diff = difficultyMeta[card.difficulty];
-          return (
-            <button
-              key={card.id}
-              onClick={() => handleCardClick(card)}
+        {loading && <ListSkeleton />}
+        {!loading && error && (
+          <ErrorPanel
+            message={userMessageFor(error.code, error.message)}
+            onRetry={reload}
+          />
+        )}
+        {!loading && !error && cards.length === 0 && (
+          <EmptyPanel />
+        )}
+        {!loading && !error && cards.map((card) => (
+          <button
+            key={card.id}
+            onClick={() => handleCardClick(card)}
+            data-testid="card-row"
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              gap: 14,
+              padding: `${tokens.cardPad}px ${tokens.cardPad}px ${tokens.cardPad}px ${tokens.cardPad + 2}px`,
+              background: '#FFFFFF',
+              border: tokens.border,
+              borderLeft: `4px solid ${
+                card.difficulty ? difficultyMeta[card.difficulty].color : tokens.primary
+              }`,
+              borderRadius: tokens.radiusMd,
+              textAlign: 'left',
+              boxShadow: tokens.shadowSm,
+              width: '100%',
+            }}
+          >
+            <div
               style={{
+                width: 46,
+                height: 46,
+                borderRadius: tokens.radiusSm,
+                background: tokens.primaryTint,
                 display: 'flex',
                 alignItems: 'center',
-                gap: 14,
-                padding: `${tokens.cardPad}px ${tokens.cardPad}px ${tokens.cardPad}px ${tokens.cardPad + 2}px`,
-                background: '#FFFFFF',
-                border: tokens.border,
-                borderLeft: `4px solid ${diff.color}`,
-                borderRadius: tokens.radiusMd,
-                textAlign: 'left',
-                boxShadow: tokens.shadowSm,
-                width: '100%',
+                justifyContent: 'center',
+                fontSize: 26,
+                flexShrink: 0,
               }}
             >
+              {card.emoji}
+            </div>
+            <div style={{ flex: 1, minWidth: 0 }}>
               <div
                 style={{
-                  width: 46,
-                  height: 46,
-                  borderRadius: tokens.radiusSm,
-                  background: tokens.primaryTint,
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 26,
-                  flexShrink: 0,
+                  fontFamily: '"Noto Sans KR", -apple-system, system-ui, sans-serif',
+                  fontSize: 17,
+                  fontWeight: 600,
+                  color: '#0F172A',
+                  letterSpacing: -0.3,
+                  lineHeight: 1.25,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
                 }}
               >
-                {card.emoji}
+                {card.korean}
               </div>
-              <div style={{ flex: 1, minWidth: 0 }}>
-                <div
-                  style={{
-                    fontFamily: '"Noto Sans KR", -apple-system, system-ui, sans-serif',
-                    fontSize: 17,
-                    fontWeight: 600,
-                    color: '#0F172A',
-                    letterSpacing: -0.3,
-                    lineHeight: 1.25,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {card.ko}
-                </div>
-                <div
-                  style={{
-                    fontSize: 13,
-                    color: '#64748B',
-                    marginTop: 2,
-                    whiteSpace: 'nowrap',
-                    overflow: 'hidden',
-                    textOverflow: 'ellipsis',
-                  }}
-                >
-                  {card.ru}
-                </div>
+              <div
+                style={{
+                  fontSize: 13,
+                  color: '#64748B',
+                  marginTop: 2,
+                  whiteSpace: 'nowrap',
+                  overflow: 'hidden',
+                  textOverflow: 'ellipsis',
+                }}
+              >
+                {card.russian}
               </div>
+            </div>
+            {card.difficulty && (
               <div
                 style={{
                   padding: '4px 9px',
                   borderRadius: 999,
-                  background: diff.bg,
-                  color: diff.color,
+                  background: difficultyMeta[card.difficulty].bg,
+                  color: difficultyMeta[card.difficulty].color,
                   fontSize: 11,
                   fontWeight: 600,
                   letterSpacing: 0.1,
                   flexShrink: 0,
                 }}
               >
-                {diff.label}
+                {difficultyMeta[card.difficulty].label}
               </div>
-              <IconChevronRight size={18} style={{ color: '#CBD5E1', flexShrink: 0 }} />
-            </button>
-          );
-        })}
+            )}
+            <IconChevronRight size={18} style={{ color: '#CBD5E1', flexShrink: 0 }} />
+          </button>
+        ))}
       </div>
 
       <BottomNav />
@@ -323,6 +341,77 @@ function SectionLabel({ children }: { children: React.ReactNode }) {
       }}
     >
       {children}
+    </div>
+  );
+}
+
+function ListSkeleton() {
+  return (
+    <>
+      {[0, 1, 2].map((i) => (
+        <div
+          key={i}
+          data-testid="card-skeleton"
+          style={{
+            height: 70,
+            background: '#F1F5F9',
+            borderRadius: tokens.radiusMd,
+            opacity: 1 - i * 0.18,
+            animation: 'mc-dots 1.4s infinite',
+          }}
+        />
+      ))}
+    </>
+  );
+}
+
+function EmptyPanel() {
+  return (
+    <div
+      data-testid="empty-cards"
+      style={{
+        padding: '24px 16px',
+        textAlign: 'center',
+        background: '#FFFFFF',
+        borderRadius: tokens.radiusMd,
+        border: tokens.border,
+        color: '#64748B',
+        fontSize: 14,
+      }}
+    >
+      이 카테고리에는 아직 카드가 없어요.
+    </div>
+  );
+}
+
+function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
+  return (
+    <div
+      data-testid="cards-error"
+      style={{
+        padding: '20px 16px',
+        textAlign: 'center',
+        background: '#FEF2F2',
+        borderRadius: tokens.radiusMd,
+        border: '1px solid #FECACA',
+        color: '#991B1B',
+      }}
+    >
+      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>{message}</div>
+      <button
+        onClick={onRetry}
+        style={{
+          padding: '8px 16px',
+          borderRadius: 999,
+          background: '#fff',
+          color: '#991B1B',
+          border: '1px solid #FECACA',
+          fontSize: 13,
+          fontWeight: 600,
+        }}
+      >
+        다시 시도
+      </button>
     </div>
   );
 }

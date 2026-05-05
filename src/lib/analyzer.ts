@@ -1,5 +1,14 @@
-import type { AnalysisResult, AnalysisStep, Card, PhonemeResult } from '../types';
-import { mockResultForDemo } from '../data/cards';
+import type {
+  AnalysisResult,
+  AnalysisStep,
+  BackendIssue,
+  BackendFullResponse,
+  Card,
+  EvaluationStatus,
+} from '../types';
+import { USE_MOCK_API } from '../api/client';
+import { postFullAnalysis } from '../api/analysis';
+import { mapAnalysisResponse } from '../api/mappers';
 
 export interface AnalyzeOptions {
   onStep?: (step: AnalysisStep) => void;
@@ -9,13 +18,6 @@ export interface AnalyzeOptions {
 export interface Analyzer {
   analyze: (audio: Blob, card: Card, options?: AnalyzeOptions) => Promise<AnalysisResult>;
 }
-
-const STEP_DELAYS: Record<AnalysisStep, number> = {
-  upload: 0,
-  phoneme: 900,
-  intonation: 1100,
-  feedback: 1100,
-};
 
 function wait(ms: number, signal?: AbortSignal): Promise<void> {
   return new Promise((resolve, reject) => {
@@ -49,83 +51,103 @@ function pseudoRandom(seed: number): () => number {
   };
 }
 
-function buildPhonemes(card: Card, rand: () => number): PhonemeResult[] {
-  return card.phonemes.map((p) => ({
-    ko: p.ko,
-    user: p.ipa,
-    target: p.ipa,
-    correct: rand() > 0.18,
-  }));
-}
-
-function buildIntonation(phonemes: PhonemeResult[], rand: () => number) {
-  const len = phonemes.length;
-  const base = 60 + Math.floor(rand() * 8);
-  return phonemes.map((p, i) => {
-    const t = i / Math.max(len - 1, 1);
-    const native = Math.round(base + t * 28 + Math.sin(t * Math.PI) * 6);
-    const mine = native + Math.round((rand() - 0.6) * 12);
-    return { c: p.ko, native, mine };
+// Build a backend-shaped response from a card so the same mapper is used in both modes.
+function buildMockBackendResponse(card: Card): BackendFullResponse {
+  const rand = pseudoRandom(hashSeed(`${card.id}-${Date.now()}`));
+  const reference = card.korean;
+  const syls = reference.replace(/[\s?!.,]/g, '').split('');
+  const issues: BackendIssue[] = [];
+  syls.forEach((ko, idx) => {
+    if (rand() < 0.18) {
+      issues.push({
+        syllable_idx: idx,
+        syllable_label: ko,
+        target: card.phonemes?.[idx]?.ipa ?? '',
+        user: card.phonemes?.[idx]?.ipa ?? '/?/',
+        note: '발음을 조금 더 또렷하게 해보세요',
+      });
+    }
   });
-}
+  const overall = Math.round(60 + ((syls.length - issues.length) / Math.max(syls.length, 1)) * 35);
+  const evaluation_status: EvaluationStatus = 'ready';
 
-function buildScore(phonemes: PhonemeResult[]): number {
-  const correct = phonemes.filter((p) => p.correct).length;
-  const ratio = correct / Math.max(phonemes.length, 1);
-  return Math.round(60 + ratio * 35);
-}
-
-function buildFeedback(card: Card, phonemes: PhonemeResult[]): string {
-  const wrong = phonemes.find((p) => !p.correct);
-  if (!wrong) {
-    return `완벽해요! 🎉 "${card.ko}" 발음이 자연스러워요. 같은 호흡으로 다른 카드도 도전해보세요.`;
-  }
-  return `전체적으로 잘했어요! '${wrong.ko}' 발음을 조금 더 또렷하게 해보세요. 입 모양과 혀 위치를 확인하면서 다시 한 번 따라 말해보세요.`;
+  return {
+    phoneme_result: {
+      status: { evaluation_status, status_message: 'mock ok' },
+      llm_feedback_input: {
+        reference_text: reference,
+        score_breakdown: {
+          overall,
+          consonant: overall - 2,
+          vowel: overall + 4,
+          coda: overall - 5,
+          fluency_like: overall * 0.3,
+        },
+        issues,
+      },
+    },
+    prosody_result: syls.map((ko, idx) => ({
+      syllable_idx: idx,
+      syllable_label: ko,
+      native_start: idx * 0.18,
+      learner_start: idx * 0.18 + (rand() - 0.5) * 0.04,
+      rmse: 0.3 + rand() * 0.3,
+      pearson: 0.6 + rand() * 0.3,
+      slope_diff: (rand() - 0.6) * 0.25,
+      duration_ratio: 0.95 + rand() * 0.2,
+    })),
+    pipeline_state: { prosody_executed: true, reason: 'ready' },
+  };
 }
 
 export const mockAnalyzer: Analyzer = {
   async analyze(_audio, card, { onStep, signal } = {}) {
-    const rand = pseudoRandom(hashSeed(`${card.id}-${Date.now()}`));
-
     onStep?.('upload');
-    await wait(STEP_DELAYS.phoneme, signal);
-
+    await wait(900, signal);
     onStep?.('phoneme');
-    const phonemes = buildPhonemes(card, rand);
-    await wait(STEP_DELAYS.intonation, signal);
-
+    await wait(1100, signal);
     onStep?.('intonation');
-    const intonation = buildIntonation(phonemes, rand);
-    await wait(STEP_DELAYS.feedback, signal);
-
+    await wait(900, signal);
     onStep?.('feedback');
-    const score = buildScore(phonemes);
-    const aiFeedback = buildFeedback(card, phonemes);
-    const wrong = phonemes.find((p) => !p.correct);
-
-    return {
-      score,
-      message: score >= 80 ? '잘했어요!' : score >= 60 ? '조금만 더!' : '다시 도전!',
-      messageEn: score >= 80 ? 'Great job!' : 'Keep going!',
-      phonemes,
-      intonation,
-      intonationWarning: wrong ? '문장 끝 억양이 부족해요' : '억양이 자연스러워요',
-      aiFeedback,
-    };
+    const backend = buildMockBackendResponse(card);
+    return mapAnalysisResponse(backend, card.korean);
   },
 };
 
-export const demoAnalyzer: Analyzer = {
-  async analyze(_audio, _card, { onStep, signal } = {}) {
+export const httpAnalyzer: Analyzer = {
+  async analyze(audio, card, { onStep, signal } = {}) {
     onStep?.('upload');
-    await wait(STEP_DELAYS.phoneme, signal);
-    onStep?.('phoneme');
-    await wait(STEP_DELAYS.intonation, signal);
-    onStep?.('intonation');
-    await wait(STEP_DELAYS.feedback, signal);
-    onStep?.('feedback');
-    return mockResultForDemo;
+    // Backend is monolithic for /analysis/full — we can't observe phoneme→prosody steps.
+    // Tick step labels at fixed intervals while waiting so the UI animates.
+    const ticker = setInterval(() => {
+      // No-op; setp progression is driven by Promise.race below
+    }, 1000);
+    try {
+      // Drive step progression while the request is in-flight
+      let stepIdx = 0;
+      const stepTimer = setInterval(() => {
+        stepIdx += 1;
+        if (stepIdx === 1) onStep?.('phoneme');
+        else if (stepIdx === 2) onStep?.('intonation');
+        else if (stepIdx === 3) onStep?.('feedback');
+      }, 700);
+
+      try {
+        const res = await postFullAnalysis({
+          audio,
+          referenceText: card.korean,
+          profile: 'ru',
+          signal,
+        });
+        onStep?.('feedback');
+        return mapAnalysisResponse(res, card.korean);
+      } finally {
+        clearInterval(stepTimer);
+      }
+    } finally {
+      clearInterval(ticker);
+    }
   },
 };
 
-export const analyzer: Analyzer = mockAnalyzer;
+export const analyzer: Analyzer = USE_MOCK_API ? mockAnalyzer : httpAnalyzer;
