@@ -18,18 +18,21 @@ export class ApiError extends Error {
   }
 }
 
-export const ERROR_USER_MESSAGES: Record<string, string> = {
-  CARD_NOT_FOUND: '카드를 찾을 수 없어요.',
-  INVALID_AUDIO: '녹음 파일을 확인해주세요.',
-  MISSING_REFERENCE_TEXT: '문장을 확인해주세요.',
-  INVALID_PROSODY_INPUT: '억양 입력이 올바르지 않아요.',
-  PIPELINE_ERROR: '분석 중 오류가 발생했습니다. 다시 시도해주세요.',
-  INTERNAL_ERROR: '서버 오류가 발생했어요. 잠시 후 다시 시도해주세요.',
-  NETWORK_ERROR: '네트워크에 연결할 수 없어요.',
-};
+export const KNOWN_ERROR_CODES = [
+  'CARD_NOT_FOUND',
+  'INVALID_AUDIO',
+  'MISSING_REFERENCE_TEXT',
+  'INVALID_PROSODY_INPUT',
+  'PIPELINE_ERROR',
+  'INTERNAL_ERROR',
+  'NETWORK_ERROR',
+] as const;
 
-export function userMessageFor(code: string, fallback?: string): string {
-  return ERROR_USER_MESSAGES[code] ?? fallback ?? '요청을 처리할 수 없어요.';
+export type KnownErrorCode = (typeof KNOWN_ERROR_CODES)[number];
+
+export function errorI18nKey(code: string): string {
+  if ((KNOWN_ERROR_CODES as readonly string[]).includes(code)) return `errors.${code}`;
+  return 'errors.DEFAULT';
 }
 
 async function readErrorBody(res: Response): Promise<ApiErrorBody | null> {

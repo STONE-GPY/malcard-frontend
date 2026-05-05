@@ -1,21 +1,46 @@
 import { useMemo, useState } from 'react';
-import { historySessions, weekData, type HistorySession } from '../data/cards';
+import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
+import { useHistoryStore } from '../stores/useHistoryStore';
+import { useCardStore } from '../stores/useCardStore';
 import BottomNav from '../components/common/BottomNav';
 import { tokens } from '../theme/tokens';
+import {
+  averageBestScore,
+  dayLabelForToday,
+  flattenSessions,
+  streakDays,
+  timeOf,
+  totalUniqueCardsLearned,
+  weekActivity,
+  type SessionEntry,
+} from '../lib/stats';
+import { mockBackendCards } from '../data/cards';
+import { decorateCard } from '../api/mappers';
 
-const FILTERS = [
-  { id: 'all', label: '전체' },
-  { id: 'good', label: '90+' },
-  { id: 'work', label: '복습 필요' },
-] as const;
+const FILTERS = ['all', 'best', 'review', 'week'] as const;
+type FilterId = (typeof FILTERS)[number];
 
-type FilterId = (typeof FILTERS)[number]['id'];
+const REVIEW_THRESHOLD = 70;
+const WEEK_MS = 7 * 24 * 60 * 60 * 1000;
 
 function ScorePill({ score }: { score: number }) {
   const color =
-    score >= 90 ? '#10B981' : score >= 75 ? tokens.primary : score >= 60 ? '#F59E0B' : '#EF4444';
+    score >= 90
+      ? '#10B981'
+      : score >= 75
+        ? tokens.primary
+        : score >= 60
+          ? '#F59E0B'
+          : '#EF4444';
   const bg =
-    score >= 90 ? '#ECFDF5' : score >= 75 ? tokens.primarySoft : score >= 60 ? '#FFFBEB' : '#FEF2F2';
+    score >= 90
+      ? '#ECFDF5'
+      : score >= 75
+        ? tokens.primarySoft
+        : score >= 60
+          ? '#FFFBEB'
+          : '#FEF2F2';
   return (
     <div
       style={{
@@ -36,9 +61,7 @@ function ScorePill({ score }: { score: number }) {
 }
 
 function Delta({ v }: { v: number }) {
-  if (v === 0) {
-    return <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>—</span>;
-  }
+  if (v === 0) return <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 600 }}>—</span>;
   const up = v > 0;
   return (
     <span
@@ -55,28 +78,54 @@ function Delta({ v }: { v: number }) {
 }
 
 export default function HistoryPage() {
+  const { t } = useTranslation();
+  const navigate = useNavigate();
+  const history = useHistoryStore((s) => s.history);
+  const setCurrentCard = useCardStore((s) => s.setCurrentCard);
   const [filter, setFilter] = useState<FilterId>('all');
 
-  const grouped = useMemo(() => {
-    return historySessions.reduce<Record<string, HistorySession[]>>((m, s) => {
-      (m[s.day] = m[s.day] ?? []).push(s);
-      return m;
-    }, {});
-  }, []);
+  const sessions = useMemo(() => flattenSessions(history), [history]);
+  const week = useMemo(() => weekActivity(history), [history]);
+  const streak = useMemo(() => streakDays(history), [history]);
+  const learned = useMemo(() => totalUniqueCardsLearned(history), [history]);
+  const avg = useMemo(() => averageBestScore(history), [history]);
+  const maxBar = useMemo(() => Math.max(1, ...week.map((w) => w.m)), [week]);
 
-  const totalCards = historySessions.length;
-  const avg = Math.round(historySessions.reduce((a, b) => a + b.score, 0) / totalCards);
-  const totalMin = weekData.reduce((a, b) => a + b.m, 0);
-  const maxBar = Math.max(...weekData.map((w) => w.m));
-
-  const visibleSessions = (sessions: HistorySession[]) => {
-    if (filter === 'good') return sessions.filter((s) => s.score >= 90);
-    if (filter === 'work') return sessions.filter((s) => s.score < 80);
+  const [pageOpenedAt] = useState(() => Date.now());
+  const filtered = useMemo(() => {
+    if (filter === 'best') return sessions.filter((s) => s.score >= 90);
+    if (filter === 'review') return sessions.filter((s) => s.score < REVIEW_THRESHOLD);
+    if (filter === 'week') return sessions.filter((s) => pageOpenedAt - s.attemptedAt < WEEK_MS);
     return sessions;
+  }, [filter, sessions, pageOpenedAt]);
+
+  const grouped = useMemo(() => {
+    const out: { dayKey: string; label: string; items: SessionEntry[] }[] = [];
+    const map = new Map<string, { label: string; items: SessionEntry[] }>();
+    for (const s of filtered) {
+      const lbl = dayLabelForToday(s.attemptedAt);
+      const key = lbl;
+      let entry = map.get(key);
+      if (!entry) {
+        entry = { label: lbl, items: [] };
+        map.set(key, entry);
+        out.push({ dayKey: key, label: lbl, items: entry.items });
+      }
+      entry.items.push(s);
+    }
+    return out;
+  }, [filtered]);
+
+  const handleSessionClick = (cardId: string) => {
+    const backendCard = mockBackendCards.find((c) => c.id === cardId);
+    if (!backendCard) return;
+    setCurrentCard(decorateCard(backendCard));
+    navigate('/learn');
   };
 
   return (
     <div
+      data-testid="history-page"
       style={{
         minHeight: '100%',
         background: tokens.pageBg,
@@ -96,13 +145,13 @@ export default function HistoryPage() {
             marginBottom: 6,
           }}
         >
-          나의 학습 기록
+          {t('history.eyebrow')}
         </div>
         <h1 style={{ fontSize: 30, fontWeight: 800, letterSpacing: -0.7, lineHeight: 1.1, margin: 0 }}>
-          기록
+          {t('history.title')}
         </h1>
         <div style={{ fontSize: 14, color: '#64748B', marginTop: 6 }}>
-          이번 주 · 카드 {totalCards}장 · 평균 {avg}점
+          {t('history.summary', { cards: learned, avg })}
         </div>
       </div>
 
@@ -115,9 +164,9 @@ export default function HistoryPage() {
         }}
       >
         {[
-          { lbl: '총 카드', val: String(totalCards), sub: '+3 오늘' },
-          { lbl: '평균 점수', val: String(avg), sub: '↑ 4점' },
-          { lbl: '학습 시간', val: `${totalMin}분`, sub: '이번 주' },
+          { lbl: t('history.stats.totalCards'), val: String(learned) },
+          { lbl: t('history.stats.avgScore'), val: String(avg) },
+          { lbl: t('history.stats.streak'), val: String(streak) },
         ].map((s, i) => (
           <div
             key={i}
@@ -151,9 +200,6 @@ export default function HistoryPage() {
             >
               {s.val}
             </div>
-            <div style={{ fontSize: 10, color: tokens.primary, fontWeight: 600, marginTop: 1 }}>
-              {s.sub}
-            </div>
           </div>
         ))}
       </div>
@@ -176,11 +222,15 @@ export default function HistoryPage() {
             marginBottom: 12,
           }}
         >
-          <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: -0.2 }}>이번 주 활동</div>
-          <div style={{ fontSize: 11, color: '#64748B', fontWeight: 500 }}>분 · 평균 점수</div>
+          <div style={{ fontSize: 14, fontWeight: 700, letterSpacing: -0.2 }}>
+            {t('history.weeklyTitle')}
+          </div>
+          <div style={{ fontSize: 11, color: '#64748B', fontWeight: 500 }}>
+            {t('history.weeklyHint')}
+          </div>
         </div>
         <div style={{ display: 'flex', alignItems: 'flex-end', gap: 6, height: 110 }}>
-          {weekData.map((w, i) => {
+          {week.map((w, i) => {
             const h = (w.m / maxBar) * 86;
             return (
               <div
@@ -201,12 +251,12 @@ export default function HistoryPage() {
                     fontVariantNumeric: 'tabular-nums',
                   }}
                 >
-                  {w.avg}
+                  {w.avg || ''}
                 </div>
                 <div
                   style={{
                     width: '100%',
-                    height: h,
+                    height: Math.max(4, h),
                     background: w.today ? tokens.primaryGradFlat : tokens.primarySoft,
                     borderRadius: 6,
                     transition: 'height 0.4s ease',
@@ -237,11 +287,12 @@ export default function HistoryPage() {
         }}
       >
         {FILTERS.map((f) => {
-          const active = filter === f.id;
+          const active = filter === f;
           return (
             <button
-              key={f.id}
-              onClick={() => setFilter(f.id)}
+              key={f}
+              onClick={() => setFilter(f)}
+              data-testid={`filter-${f}`}
               style={{
                 flexShrink: 0,
                 padding: '8px 14px',
@@ -255,7 +306,7 @@ export default function HistoryPage() {
                 boxShadow: active ? `0 6px 16px -4px ${tokens.primaryShadow}` : 'none',
               }}
             >
-              {f.label}
+              {t(`history.filters.${f}`)}
             </button>
           );
         })}
@@ -269,97 +320,133 @@ export default function HistoryPage() {
           gap: 14,
         }}
       >
-        {Object.entries(grouped).map(([day, sessions]) => {
-          const vis = visibleSessions(sessions);
-          if (vis.length === 0) return null;
-          return (
-            <div key={day}>
-              <div
-                style={{
-                  fontSize: 11,
-                  fontWeight: 700,
-                  letterSpacing: 1.2,
-                  textTransform: 'uppercase',
-                  color: '#94A3B8',
-                  marginBottom: 8,
-                  marginTop: 4,
-                  display: 'flex',
-                  justifyContent: 'space-between',
-                  alignItems: 'center',
-                }}
-              >
-                <span>{day}</span>
-                <span style={{ color: '#CBD5E1', fontWeight: 500, letterSpacing: 0 }}>
-                  {vis.length}회
-                </span>
-              </div>
-              <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
-                {vis.map((s) => (
+        {sessions.length === 0 && (
+          <div
+            data-testid="history-empty"
+            style={{
+              padding: '24px 16px',
+              textAlign: 'center',
+              background: '#FFFFFF',
+              borderRadius: tokens.radiusMd,
+              border: tokens.border,
+              color: '#64748B',
+              fontSize: 14,
+            }}
+          >
+            {t('history.empty')}
+          </div>
+        )}
+        {sessions.length > 0 && filtered.length === 0 && (
+          <div
+            data-testid="history-empty-filter"
+            style={{
+              padding: '24px 16px',
+              textAlign: 'center',
+              background: '#FFFFFF',
+              borderRadius: tokens.radiusMd,
+              border: tokens.border,
+              color: '#64748B',
+              fontSize: 14,
+            }}
+          >
+            {t('cards.empty')}
+          </div>
+        )}
+        {grouped.map(({ dayKey, label, items }) => (
+          <div key={dayKey}>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 700,
+                letterSpacing: 1.2,
+                textTransform: 'uppercase',
+                color: '#94A3B8',
+                marginBottom: 8,
+                marginTop: 4,
+                display: 'flex',
+                justifyContent: 'space-between',
+                alignItems: 'center',
+              }}
+            >
+              <span>
+                {label === 'today'
+                  ? t('history.today')
+                  : label === 'yesterday'
+                    ? t('history.yesterday')
+                    : label}
+              </span>
+              <span style={{ color: '#CBD5E1', fontWeight: 500, letterSpacing: 0 }}>
+                {t('history.sessionCount', { count: items.length })}
+              </span>
+            </div>
+            <div style={{ display: 'flex', flexDirection: 'column', gap: 6 }}>
+              {items.map((s, idx) => (
+                <button
+                  key={`${s.cardId}-${s.attemptedAt}-${idx}`}
+                  onClick={() => handleSessionClick(s.cardId)}
+                  data-testid="history-session"
+                  style={{
+                    display: 'flex',
+                    alignItems: 'center',
+                    gap: 12,
+                    padding: '12px 14px',
+                    background: '#FFFFFF',
+                    border: tokens.border,
+                    borderRadius: tokens.radiusMd,
+                    boxShadow: tokens.shadowSm,
+                    width: '100%',
+                    textAlign: 'left',
+                  }}
+                >
                   <div
-                    key={s.id}
                     style={{
-                      display: 'flex',
-                      alignItems: 'center',
-                      gap: 12,
-                      padding: '12px 14px',
-                      background: '#FFFFFF',
-                      border: tokens.border,
-                      borderRadius: tokens.radiusMd,
-                      boxShadow: tokens.shadowSm,
+                      fontSize: 11,
+                      color: '#94A3B8',
+                      fontWeight: 600,
+                      fontVariantNumeric: 'tabular-nums',
+                      letterSpacing: -0.1,
+                      width: 40,
+                      flexShrink: 0,
                     }}
                   >
+                    {timeOf(s.attemptedAt)}
+                  </div>
+                  <div style={{ flex: 1, minWidth: 0 }}>
+                    <div
+                      style={{
+                        fontFamily: '"Noto Sans KR", system-ui',
+                        fontSize: 15,
+                        fontWeight: 600,
+                        letterSpacing: -0.2,
+                        whiteSpace: 'nowrap',
+                        overflow: 'hidden',
+                        textOverflow: 'ellipsis',
+                      }}
+                    >
+                      {s.korean}
+                    </div>
                     <div
                       style={{
                         fontSize: 11,
-                        color: '#94A3B8',
-                        fontWeight: 600,
-                        fontVariantNumeric: 'tabular-nums',
-                        letterSpacing: -0.1,
-                        width: 40,
-                        flexShrink: 0,
+                        color: '#64748B',
+                        marginTop: 1,
+                        display: 'flex',
+                        alignItems: 'center',
+                        gap: 6,
+                        whiteSpace: 'nowrap',
                       }}
                     >
-                      {s.time}
+                      {s.type && <span>{s.type}</span>}
+                      <span style={{ color: '#CBD5E1' }}>·</span>
+                      <Delta v={s.delta} />
                     </div>
-                    <div style={{ flex: 1, minWidth: 0 }}>
-                      <div
-                        style={{
-                          fontFamily: '"Noto Sans KR", system-ui',
-                          fontSize: 15,
-                          fontWeight: 600,
-                          letterSpacing: -0.2,
-                          whiteSpace: 'nowrap',
-                          overflow: 'hidden',
-                          textOverflow: 'ellipsis',
-                        }}
-                      >
-                        {s.card}
-                      </div>
-                      <div
-                        style={{
-                          fontSize: 11,
-                          color: '#64748B',
-                          marginTop: 1,
-                          display: 'flex',
-                          alignItems: 'center',
-                          gap: 6,
-                          whiteSpace: 'nowrap',
-                        }}
-                      >
-                        <span>{s.cat}</span>
-                        <span style={{ color: '#CBD5E1' }}>·</span>
-                        <span style={{ whiteSpace: 'nowrap' }}>
-                          <Delta v={s.delta} />
-                        </span>
-                      </div>
-                    </div>
-                    <ScorePill score={s.score} />
                   </div>
-                ))}
-              </div>
+                  <ScorePill score={s.score} />
+                </button>
+              ))}
             </div>
-          );
-        })}
+          </div>
+        ))}
       </div>
 
       <BottomNav />

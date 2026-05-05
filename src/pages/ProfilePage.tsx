@@ -1,21 +1,65 @@
-import { useState, type ReactNode } from 'react';
-import { achievements } from '../data/cards';
+import { useMemo, useState, type ReactNode } from 'react';
+import { useTranslation } from 'react-i18next';
+import { useHistoryStore, type DailyGoalType } from '../stores/useHistoryStore';
 import BottomNav from '../components/common/BottomNav';
 import { tokens } from '../theme/tokens';
-import { IconChevronRight } from '../components/icons';
+import {
+  achievementStates,
+  averageBestScore,
+  streakDays,
+  totalUniqueCardsLearned,
+} from '../lib/stats';
+import i18n, { saveLanguage, SUPPORTED_LANGUAGES, type SupportedLanguage } from '../i18n';
+
+const APP_VERSION = '1.0.0-mvp';
 
 export default function ProfilePage() {
+  const { t, i18n: i18nInst } = useTranslation();
+  const history = useHistoryStore((s) => s.history);
+  const goal = useHistoryStore((s) => s.goal);
+  const setGoal = useHistoryStore((s) => s.setGoal);
+
   const [reminders, setReminders] = useState(true);
   const [autoplay, setAutoplay] = useState(true);
   const [strictMode, setStrict] = useState(false);
 
-  const xp = 2840;
-  const xpNext = 3500;
-  const level = 8;
-  const pct = (xp / xpNext) * 100;
+  const [openModal, setOpenModal] = useState<null | 'language' | 'goal' | 'help' | 'feedback' | 'about'>(null);
+
+  const streak = useMemo(() => streakDays(history), [history]);
+  const learned = useMemo(() => totalUniqueCardsLearned(history), [history]);
+  const avg = useMemo(() => averageBestScore(history), [history]);
+  const achievements = useMemo(
+    () => achievementStates(history, streak),
+    [history, streak],
+  );
+  const earnedCount = achievements.filter((a) => a.earned).length;
+
+  // Level: simple derivation (each 10 unique cards levels up)
+  const level = Math.max(1, Math.floor(learned / 10) + 1);
+  const xp = learned * 30 + avg * 2;
+  const xpForLevel = (lvl: number) => lvl * 350;
+  const xpNext = xpForLevel(level);
+  const pct = Math.min(100, Math.max(0, (xp / xpNext) * 100));
+
+  const currentLang = (i18nInst.language as SupportedLanguage) ?? 'ko';
+
+  const handleChangeLang = (lang: SupportedLanguage) => {
+    void i18n.changeLanguage(lang);
+    saveLanguage(lang);
+    setOpenModal(null);
+  };
+
+  const goalLabel =
+    goal.type === 'cardCount'
+      ? t('profile.goalCount', { n: goal.target })
+      : t('profile.goalAvg', { n: goal.target });
+
+  const langLabel =
+    currentLang === 'ko' ? t('language.ko') : currentLang === 'en' ? t('language.en') : t('language.ru');
 
   return (
     <div
+      data-testid="profile-page"
       style={{
         minHeight: '100%',
         background: tokens.pageBg,
@@ -75,7 +119,7 @@ export default function ProfilePage() {
               letterSpacing: -1,
             }}
           >
-            А
+            {currentLang === 'ru' ? 'У' : currentLang === 'en' ? 'L' : '학'}
           </div>
           <div style={{ flex: 1 }}>
             <div
@@ -87,7 +131,7 @@ export default function ProfilePage() {
                 fontWeight: 600,
               }}
             >
-              레벨 {level} · 중급
+              {t('profile.levelLabel', { level })} · {t('profile.levelTier')}
             </div>
             <div
               style={{
@@ -98,27 +142,10 @@ export default function ProfilePage() {
                 marginTop: 2,
               }}
             >
-              안나 · Anna
+              {t('profile.name')}
             </div>
-            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>
-              러시아어 → 한국어 · 47일째
-            </div>
+            <div style={{ fontSize: 12, opacity: 0.85, marginTop: 2 }}>{t('profile.daysLine')}</div>
           </div>
-          <button
-            style={{
-              width: 36,
-              height: 36,
-              borderRadius: '50%',
-              background: 'rgba(255,255,255,0.18)',
-              color: '#fff',
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'center',
-              backdropFilter: 'blur(8px)',
-            }}
-          >
-            <IconChevronRight size={18} stroke={2.4} />
-          </button>
         </div>
 
         <div style={{ marginTop: 18, position: 'relative' }}>
@@ -132,8 +159,8 @@ export default function ProfilePage() {
               opacity: 0.95,
             }}
           >
-            <span>{xp} XP</span>
-            <span>다음 레벨까지 {xpNext - xp}</span>
+            <span>{Math.round(xp)} XP</span>
+            <span>· {Math.max(0, Math.round(xpNext - xp))} XP</span>
           </div>
           <div
             style={{
@@ -171,9 +198,9 @@ export default function ProfilePage() {
         }}
       >
         {[
-          { v: '12', lbl: '연속 일수', icon: '🔥' },
-          { v: '186', lbl: '학습 카드' },
-          { v: '83', lbl: '평균 점수' },
+          { v: String(streak), lbl: t('profile.streakDays'), icon: '🔥' },
+          { v: String(learned), lbl: t('profile.learnedCards') },
+          { v: String(avg), lbl: t('profile.avgScore') },
         ].map((s, i) => (
           <div
             key={i}
@@ -209,7 +236,9 @@ export default function ProfilePage() {
         ))}
       </div>
 
-      <SectionLabel>업적 · 3 / 6</SectionLabel>
+      <SectionLabel>
+        {t('profile.achievementsHeader', { earned: earnedCount, total: achievements.length })}
+      </SectionLabel>
       <div
         style={{
           padding: `0 ${tokens.pad}px`,
@@ -257,7 +286,7 @@ export default function ProfilePage() {
                 wordBreak: 'keep-all',
               }}
             >
-              {a.name}
+              {t(a.nameKey)}
             </div>
             <div
               style={{
@@ -268,9 +297,9 @@ export default function ProfilePage() {
                 wordBreak: 'keep-all',
               }}
             >
-              {a.sub}
+              {t(a.subKey)}
             </div>
-            {!a.earned && a.progress != null && (
+            {!a.earned && (
               <div
                 style={{
                   position: 'absolute',
@@ -296,11 +325,11 @@ export default function ProfilePage() {
         ))}
       </div>
 
-      <SectionLabel>설정</SectionLabel>
+      <SectionLabel>{t('profile.settings')}</SectionLabel>
       <SettingsGroup>
         <SettingRow
           icon="🔔"
-          label="매일 알림"
+          label="알림"
           sub="저녁 9시"
           trailing={<Toggle on={reminders} onChange={() => setReminders(!reminders)} />}
         />
@@ -321,48 +350,84 @@ export default function ProfilePage() {
       </SettingsGroup>
 
       <SettingsGroup>
-        <SettingRow icon="🌐" label="학습 언어" sub="한국어" trailing={<Chev />} />
+        <SettingRow
+          icon="🌐"
+          label={t('profile.appLanguage')}
+          sub={langLabel}
+          onClick={() => setOpenModal('language')}
+          trailing={<TriangleArrow />}
+        />
         <SettingDiv />
-        <SettingRow icon="🇷🇺" label="앱 언어" sub="Русский" trailing={<Chev />} />
-        <SettingDiv />
-        <SettingRow icon="📊" label="목표 점수" sub="평균 85점" trailing={<Chev />} />
+        <SettingRow
+          icon="📊"
+          label={t('profile.dailyGoal')}
+          sub={goalLabel}
+          onClick={() => setOpenModal('goal')}
+          trailing={<TriangleArrow />}
+        />
       </SettingsGroup>
 
       <SettingsGroup>
-        <SettingRow icon="❓" label="도움말 · 자주 묻는 질문" trailing={<Chev />} />
+        <SettingRow
+          icon="❓"
+          label={t('profile.help')}
+          onClick={() => setOpenModal('help')}
+          trailing={<TriangleArrow />}
+        />
         <SettingDiv />
-        <SettingRow icon="✉️" label="피드백 보내기" trailing={<Chev />} />
+        <SettingRow
+          icon="✉️"
+          label={t('profile.feedback')}
+          onClick={() => setOpenModal('feedback')}
+          trailing={<TriangleArrow />}
+        />
         <SettingDiv />
-        <SettingRow icon="ℹ️" label="MalCard 정보" sub="v1.4.2" trailing={<Chev />} />
+        <SettingRow
+          icon="ℹ️"
+          label={t('profile.about')}
+          sub={t('profile.version', { v: APP_VERSION })}
+          onClick={() => setOpenModal('about')}
+          trailing={<TriangleArrow />}
+        />
       </SettingsGroup>
-
-      <button
-        style={{
-          margin: `${tokens.gap + 10}px ${tokens.pad}px 0`,
-          padding: '14px 16px',
-          borderRadius: tokens.radiusMd,
-          background: '#FFFFFF',
-          color: '#EF4444',
-          border: tokens.border,
-          fontSize: 14,
-          fontWeight: 600,
-        }}
-      >
-        로그아웃
-      </button>
 
       <div
         style={{
-          padding: '14px 0 24px',
+          padding: '20px 0 24px',
           textAlign: 'center',
           fontSize: 11,
           color: '#CBD5E1',
         }}
       >
-        Made for learners · MalCard
+        {t('profile.footer')}
       </div>
 
       <BottomNav />
+
+      {openModal === 'language' && (
+        <LanguageModal current={currentLang} onPick={handleChangeLang} onClose={() => setOpenModal(null)} />
+      )}
+      {openModal === 'goal' && (
+        <GoalModal
+          initial={goal}
+          onSave={(g) => {
+            setGoal(g);
+            setOpenModal(null);
+          }}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
+      {openModal === 'help' && (
+        <SimpleModal title={t('help.title')} body={t('help.body')} onClose={() => setOpenModal(null)} />
+      )}
+      {openModal === 'feedback' && <FeedbackModal onClose={() => setOpenModal(null)} />}
+      {openModal === 'about' && (
+        <SimpleModal
+          title={t('about.title')}
+          body={`${t('about.body')}\n\n${t('about.versionLine', { v: APP_VERSION })}`}
+          onClose={() => setOpenModal(null)}
+        />
+      )}
     </div>
   );
 }
@@ -409,14 +474,29 @@ function SettingRow({
   label,
   sub,
   trailing,
+  onClick,
 }: {
   icon: string;
   label: string;
   sub?: string;
   trailing?: ReactNode;
+  onClick?: () => void;
 }) {
+  const Component: 'button' | 'div' = onClick ? 'button' : 'div';
   return (
-    <div style={{ display: 'flex', alignItems: 'center', gap: 12, padding: '13px 14px' }}>
+    <Component
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        gap: 12,
+        padding: '13px 14px',
+        width: '100%',
+        textAlign: 'left',
+        background: 'transparent',
+        border: 'none',
+      }}
+    >
       <div
         style={{
           width: 36,
@@ -441,6 +521,7 @@ function SettingRow({
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
+            color: '#0F172A',
           }}
         >
           {label}
@@ -448,7 +529,7 @@ function SettingRow({
         {sub && <div style={{ fontSize: 12, color: '#64748B', marginTop: 1 }}>{sub}</div>}
       </div>
       {trailing}
-    </div>
+    </Component>
   );
 }
 
@@ -456,8 +537,10 @@ function SettingDiv() {
   return <div style={{ height: 1, background: '#F1F5F9', margin: '0 14px 0 62px' }} />;
 }
 
-function Chev() {
-  return <IconChevronRight size={18} style={{ color: '#CBD5E1' }} />;
+function TriangleArrow() {
+  return (
+    <span style={{ color: '#CBD5E1', fontSize: 14, fontWeight: 700 }}>›</span>
+  );
 }
 
 function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
@@ -489,5 +572,297 @@ function Toggle({ on, onChange }: { on: boolean; onChange: () => void }) {
         }}
       />
     </button>
+  );
+}
+
+function ModalShell({ title, onClose, children }: { title: string; onClose: () => void; children: ReactNode }) {
+  return (
+    <div
+      data-testid="modal"
+      onClick={onClose}
+      style={{
+        position: 'fixed',
+        inset: 0,
+        background: 'rgba(15,23,42,0.45)',
+        display: 'flex',
+        alignItems: 'flex-end',
+        justifyContent: 'center',
+        zIndex: 100,
+      }}
+    >
+      <div
+        onClick={(e) => e.stopPropagation()}
+        style={{
+          width: '100%',
+          maxWidth: 390,
+          background: '#fff',
+          borderTopLeftRadius: tokens.radiusXl,
+          borderTopRightRadius: tokens.radiusXl,
+          padding: 22,
+          paddingBottom: 32,
+          animation: 'mc-fade-up 0.25s both',
+        }}
+      >
+        <div style={{ fontSize: 18, fontWeight: 800, letterSpacing: -0.3, marginBottom: 12 }}>
+          {title}
+        </div>
+        {children}
+      </div>
+    </div>
+  );
+}
+
+function LanguageModal({
+  current,
+  onPick,
+  onClose,
+}: {
+  current: SupportedLanguage;
+  onPick: (lang: SupportedLanguage) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  return (
+    <ModalShell title={t('language.title')} onClose={onClose}>
+      <div style={{ display: 'flex', flexDirection: 'column', gap: 8 }}>
+        {SUPPORTED_LANGUAGES.map((lang) => {
+          const active = lang === current;
+          return (
+            <button
+              key={lang}
+              onClick={() => onPick(lang)}
+              data-testid={`lang-${lang}`}
+              style={{
+                padding: '14px 16px',
+                borderRadius: tokens.radiusMd,
+                border: active ? `2px solid ${tokens.primary}` : '1px solid #E2E8F0',
+                background: active ? tokens.primarySoft : '#fff',
+                color: '#0F172A',
+                textAlign: 'left',
+                fontSize: 15,
+                fontWeight: 600,
+              }}
+            >
+              {t(`language.${lang}`)}
+              {active && <span style={{ float: 'right', color: tokens.primary }}>✓</span>}
+            </button>
+          );
+        })}
+      </div>
+    </ModalShell>
+  );
+}
+
+function GoalModal({
+  initial,
+  onSave,
+  onClose,
+}: {
+  initial: { type: DailyGoalType; target: number };
+  onSave: (g: { type: DailyGoalType; target: number }) => void;
+  onClose: () => void;
+}) {
+  const { t } = useTranslation();
+  const [type, setType] = useState<DailyGoalType>(initial.type);
+  const [target, setTarget] = useState<number>(initial.target);
+
+  const min = type === 'cardCount' ? 1 : 50;
+  const max = type === 'cardCount' ? 30 : 100;
+
+  return (
+    <ModalShell title={t('goal.title')} onClose={onClose}>
+      <div style={{ fontSize: 13, color: '#64748B', marginBottom: 14 }}>{t('goal.description')}</div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        {t('goal.typeLabel')}
+      </div>
+      <div style={{ display: 'flex', gap: 8, marginBottom: 16 }}>
+        {(['cardCount', 'avgScore'] as DailyGoalType[]).map((opt) => {
+          const active = type === opt;
+          return (
+            <button
+              key={opt}
+              onClick={() => {
+                setType(opt);
+                setTarget(opt === 'cardCount' ? 5 : 80);
+              }}
+              data-testid={`goal-type-${opt}`}
+              style={{
+                flex: 1,
+                padding: '10px 12px',
+                borderRadius: 999,
+                border: active ? 'none' : '1px solid #E2E8F0',
+                background: active ? tokens.primaryGradFlat : '#fff',
+                color: active ? '#fff' : '#0F172A',
+                fontWeight: 600,
+                fontSize: 13,
+              }}
+            >
+              {opt === 'cardCount' ? t('goal.typeCount') : t('goal.typeAvg')}
+            </button>
+          );
+        })}
+      </div>
+      <div style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', marginBottom: 6, textTransform: 'uppercase', letterSpacing: 0.8 }}>
+        {t('goal.targetLabel')}
+      </div>
+      <div style={{ display: 'flex', alignItems: 'center', gap: 10, marginBottom: 18 }}>
+        <input
+          type="range"
+          min={min}
+          max={max}
+          step={type === 'cardCount' ? 1 : 5}
+          value={target}
+          onChange={(e) => setTarget(Number(e.target.value))}
+          data-testid="goal-target"
+          style={{ flex: 1 }}
+        />
+        <div style={{ width: 64, textAlign: 'right', fontWeight: 700, fontSize: 18 }}>{target}</div>
+      </div>
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={onClose}
+          style={{
+            flex: 1,
+            padding: '14px 16px',
+            borderRadius: tokens.radiusMd,
+            background: '#fff',
+            border: '1px solid #E2E8F0',
+            color: '#0F172A',
+            fontSize: 15,
+            fontWeight: 600,
+          }}
+        >
+          {t('goal.cancel')}
+        </button>
+        <button
+          onClick={() => onSave({ type, target })}
+          data-testid="goal-save"
+          style={{
+            flex: 1,
+            padding: '14px 16px',
+            borderRadius: tokens.radiusMd,
+            background: tokens.primaryGrad,
+            color: '#fff',
+            fontSize: 15,
+            fontWeight: 700,
+          }}
+        >
+          {t('goal.save')}
+        </button>
+      </div>
+    </ModalShell>
+  );
+}
+
+function SimpleModal({ title, body, onClose }: { title: string; body: string; onClose: () => void }) {
+  const { t } = useTranslation();
+  return (
+    <ModalShell title={title} onClose={onClose}>
+      <div style={{ fontSize: 14, color: '#475569', lineHeight: 1.6, whiteSpace: 'pre-line', marginBottom: 18 }}>
+        {body}
+      </div>
+      <button
+        onClick={onClose}
+        style={{
+          width: '100%',
+          padding: '14px 16px',
+          borderRadius: tokens.radiusMd,
+          background: tokens.primaryGrad,
+          color: '#fff',
+          fontSize: 15,
+          fontWeight: 700,
+        }}
+      >
+        {t('help.close')}
+      </button>
+    </ModalShell>
+  );
+}
+
+function FeedbackModal({ onClose }: { onClose: () => void }) {
+  const { t } = useTranslation();
+  const [contact, setContact] = useState('');
+  const [message, setMessage] = useState('');
+
+  const submit = () => {
+    if (!message.trim()) return;
+    const subject = encodeURIComponent('[MalCard] Feedback');
+    const body = encodeURIComponent(`${message}\n\n---\nContact: ${contact}`);
+    window.location.href = `mailto:feedback@malcard.app?subject=${subject}&body=${body}`;
+    onClose();
+  };
+
+  return (
+    <ModalShell title={t('feedbackForm.title')} onClose={onClose}>
+      <div style={{ fontSize: 13, color: '#64748B', marginBottom: 14 }}>{t('feedbackForm.body')}</div>
+      <label style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
+        {t('feedbackForm.contactLabel')}
+      </label>
+      <input
+        value={contact}
+        onChange={(e) => setContact(e.target.value)}
+        placeholder="example@mail.com"
+        style={{
+          width: '100%',
+          padding: 10,
+          marginTop: 4,
+          marginBottom: 12,
+          borderRadius: 10,
+          border: '1px solid #E2E8F0',
+          fontSize: 14,
+          fontFamily: 'inherit',
+        }}
+      />
+      <label style={{ fontSize: 11, fontWeight: 700, color: '#94A3B8', textTransform: 'uppercase' }}>
+        {t('feedbackForm.messageLabel')}
+      </label>
+      <textarea
+        value={message}
+        onChange={(e) => setMessage(e.target.value)}
+        rows={4}
+        style={{
+          width: '100%',
+          padding: 10,
+          marginTop: 4,
+          marginBottom: 12,
+          borderRadius: 10,
+          border: '1px solid #E2E8F0',
+          fontSize: 14,
+          fontFamily: 'inherit',
+          resize: 'vertical',
+        }}
+      />
+      <div style={{ display: 'flex', gap: 8 }}>
+        <button
+          onClick={onClose}
+          style={{
+            flex: 1,
+            padding: '14px 16px',
+            borderRadius: tokens.radiusMd,
+            background: '#fff',
+            border: '1px solid #E2E8F0',
+            color: '#0F172A',
+            fontSize: 15,
+            fontWeight: 600,
+          }}
+        >
+          {t('feedbackForm.cancel')}
+        </button>
+        <button
+          onClick={submit}
+          style={{
+            flex: 1,
+            padding: '14px 16px',
+            borderRadius: tokens.radiusMd,
+            background: tokens.primaryGrad,
+            color: '#fff',
+            fontSize: 15,
+            fontWeight: 700,
+          }}
+        >
+          {t('feedbackForm.submit')}
+        </button>
+      </div>
+    </ModalShell>
   );
 }

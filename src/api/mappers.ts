@@ -8,39 +8,25 @@ import type {
   IntonationPointUi,
   PhonemeResultUi,
 } from '../types';
-import { cardUiExtras, emojiForType } from '../data/cards';
+import { difficultyForCard, emojiForCard } from '../data/cards';
 
 export function decorateCard(card: BackendCard): Card {
-  const extras = cardUiExtras[card.id] ?? {};
   return {
     ...card,
-    emoji: extras.emoji ?? emojiForType(card.type),
-    romanized: extras.romanized,
-    difficulty: extras.difficulty,
-    phonemes: extras.phonemes,
+    emoji: emojiForCard(card),
+    difficulty: difficultyForCard(card),
+    // romanized + per-syllable phoneme breakdown not provided by backend.
   };
 }
 
-// Split a Korean string into per-syllable labels (drop spaces/punctuation).
 function syllablesOf(text: string): string[] {
   return text.replace(/[\s?!.,]/g, '').split('').filter((c) => c.length > 0);
 }
 
-function issueLabel(it: BackendIssue): string {
-  return it.syllable_label ?? it.ko ?? '';
-}
-
-function issueTarget(it: BackendIssue): string {
-  return it.target ?? it.expected ?? '';
-}
-
-function issueUser(it: BackendIssue): string {
-  return it.user ?? it.actual ?? '';
-}
-
-function issueNote(it: BackendIssue): string | undefined {
-  return it.note ?? it.hint;
-}
+const issueLabel = (it: BackendIssue): string => it.syllable_label ?? it.ko ?? '';
+const issueTarget = (it: BackendIssue): string => it.target ?? it.expected ?? '';
+const issueUser = (it: BackendIssue): string => it.user ?? it.actual ?? '';
+const issueNote = (it: BackendIssue): string | undefined => it.note ?? it.hint;
 
 function buildPhonemes(referenceText: string, issues: BackendIssue[]): PhonemeResultUi[] {
   const syls = syllablesOf(referenceText);
@@ -64,10 +50,8 @@ function buildPhonemes(referenceText: string, issues: BackendIssue[]): PhonemeRe
   });
 
   return syls.map((ko, i) => {
-    const issue = issuesByLabel.get(ko) ?? issuesByIdx.get(i);
-    if (!issue) {
-      return { ko, target: '', user: '', correct: true };
-    }
+    const issue = issuesByIdx.get(i) ?? issuesByLabel.get(ko);
+    if (!issue) return { ko, target: '', user: '', correct: true };
     return {
       ko,
       target: issueTarget(issue),
@@ -78,8 +62,6 @@ function buildPhonemes(referenceText: string, issues: BackendIssue[]): PhonemeRe
   });
 }
 
-// Synthesize a stylized pitch curve from prosody metrics so the chart still tells
-// a useful story. Backend gives slope_diff/pearson per syllable, not raw pitch.
 function buildIntonation(
   referenceText: string,
   prosody: BackendProsodyPoint[],
@@ -106,21 +88,21 @@ function buildIntonation(
 }
 
 function pickFeedbackMessage(score: number): string {
-  if (score >= 90) return '훌륭해요!';
-  if (score >= 80) return '잘했어요!';
-  if (score >= 60) return '조금만 더!';
-  return '다시 도전!';
+  if (score >= 90) return 'message.excellent';
+  if (score >= 80) return 'message.great';
+  if (score >= 60) return 'message.keepGoing';
+  return 'message.tryAgain';
 }
 
 function pickIntonationWarning(prosody: BackendProsodyPoint[]): string {
-  if (prosody.length === 0) return '억양 데이터가 없어요';
+  if (prosody.length === 0) return 'intonation.empty';
   const last = prosody[prosody.length - 1];
-  if (last && last.slope_diff < -0.05) return '문장 끝 억양이 부족해요';
-  if (last && last.slope_diff > 0.1) return '문장 끝 억양이 과해요';
+  if (last && last.slope_diff < -0.05) return 'intonation.endRiseLow';
+  if (last && last.slope_diff > 0.1) return 'intonation.endRiseHigh';
   const avgPearson =
     prosody.reduce((a, b) => a + (b.pearson ?? 0), 0) / Math.max(prosody.length, 1);
-  if (avgPearson < 0.5) return '억양 흐름을 더 다듬어 보세요';
-  return '억양이 자연스러워요';
+  if (avgPearson < 0.5) return 'intonation.choppy';
+  return 'intonation.natural';
 }
 
 function pickAiFeedback(
@@ -131,19 +113,15 @@ function pickAiFeedback(
   fallback?: string,
 ): string {
   if (fallback) return fallback;
-  if (status === 'retry') {
-    return '녹음 신호가 부족해요. 조용한 곳에서 한 번 더 또렷하게 말해 주세요.';
-  }
-  if (status === 'discarded') {
-    return '결과 신뢰도가 낮아요. 마이크와 환경을 확인하고 다시 시도해 보세요.';
-  }
+  if (status === 'retry') return 'feedback.retry';
+  if (status === 'discarded') return 'feedback.discarded';
   if (issues.length === 0) {
-    return `완벽해요! 🎉 "${reference}" 발음이 자연스러워요. 같은 호흡으로 다른 카드도 도전해보세요.`;
+    return `feedback.perfect|${reference}`;
   }
   const wrong = issues[0];
   const label = issueLabel(wrong);
-  const note = issueNote(wrong);
-  return `전체적으로 잘했어요 (${score}점). '${label}' 발음을 다시 한 번 다듬어 보세요${note ? ` — ${note}` : ''}.`;
+  const note = issueNote(wrong) ?? '';
+  return `feedback.imperfect|${label}|${score}|${note}`;
 }
 
 export function mapAnalysisResponse(

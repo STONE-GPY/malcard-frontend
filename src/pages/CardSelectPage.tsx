@@ -1,34 +1,43 @@
-import { useEffect } from 'react';
+import { useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useCardStore } from '../stores/useCardStore';
+import { useHistoryStore } from '../stores/useHistoryStore';
 import { categories, decks, difficultyMeta } from '../data/cards';
 import BottomNav from '../components/common/BottomNav';
 import { IconChevronRight, IconFlame } from '../components/icons';
 import { tokens } from '../theme/tokens';
 import { useCards } from '../hooks/useCards';
-import { userMessageFor } from '../api/client';
+import { errorI18nKey } from '../api/client';
+import { streakDays } from '../lib/stats';
 import type { Card, CategoryId } from '../types';
 
 export default function CardSelectPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const { selectedCategory, setCategory, setCurrentCard, setCardList } = useCardStore();
   const { cards, loading, error, reload } = useCards(selectedCategory);
+  const history = useHistoryStore((s) => s.history);
 
   useEffect(() => {
     setCardList(cards);
   }, [cards, setCardList]);
 
   const showDecks = selectedCategory === 'all' || selectedCategory === 'situations';
+  const streak = useMemo(() => streakDays(history), [history]);
 
   const handleCardClick = (card: Card) => {
     setCurrentCard(card);
     navigate('/learn');
   };
 
-  const handleDeckClick = () => {
-    const demo = cards.find((c) => c.id === 'sit_01') ?? cards[0];
-    if (demo) {
-      setCurrentCard(demo);
+  const handleDeckClick = (keywords: string[]) => {
+    setCategory('situations');
+    const target = cards.find(
+      (c) => c.type === '상황형회화' && keywords.some((k) => c.korean.includes(k)),
+    );
+    if (target) {
+      setCurrentCard(target);
       navigate('/learn');
     }
   };
@@ -54,7 +63,7 @@ export default function CardSelectPage() {
             marginBottom: 6,
           }}
         >
-          좋은 아침이에요, 안나
+          {t('app.greeting')}
         </div>
         <h1
           style={{
@@ -66,27 +75,30 @@ export default function CardSelectPage() {
             color: '#0F172A',
           }}
         >
-          MalCard
+          {t('app.name')}
         </h1>
         <div style={{ fontSize: 15, color: '#64748B', marginTop: 6, fontWeight: 400 }}>
-          카드로 한국어를 배우세요 — 듣고, 따라 말하고, 발음을 다듬어 보세요
+          {t('app.tagline')}
         </div>
-        <div
-          style={{
-            display: 'inline-flex',
-            alignItems: 'center',
-            gap: 6,
-            padding: '6px 12px',
-            borderRadius: 999,
-            background: `linear-gradient(135deg, ${tokens.streakA} 0%, ${tokens.streakB} 100%)`,
-            color: tokens.streakText,
-            fontSize: 13,
-            fontWeight: 600,
-            marginTop: 14,
-          }}
-        >
-          <IconFlame size={14} stroke={2.4} /> 12일 연속 학습 중
-        </div>
+        {streak > 0 && (
+          <div
+            data-testid="streak-chip"
+            style={{
+              display: 'inline-flex',
+              alignItems: 'center',
+              gap: 6,
+              padding: '6px 12px',
+              borderRadius: 999,
+              background: `linear-gradient(135deg, ${tokens.streakA} 0%, ${tokens.streakB} 100%)`,
+              color: tokens.streakText,
+              fontSize: 13,
+              fontWeight: 600,
+              marginTop: 14,
+            }}
+          >
+            <IconFlame size={14} stroke={2.4} /> {t('cards.streak', { count: streak })}
+          </div>
+        )}
       </div>
 
       <div
@@ -104,6 +116,7 @@ export default function CardSelectPage() {
             <button
               key={cat.id}
               onClick={() => setCategory(cat.id as CategoryId)}
+              data-testid={`category-${cat.id}`}
               style={{
                 flexShrink: 0,
                 padding: '10px 18px',
@@ -120,7 +133,7 @@ export default function CardSelectPage() {
                 whiteSpace: 'nowrap',
               }}
             >
-              {cat.label}
+              {t(cat.labelKey)}
             </button>
           );
         })}
@@ -128,7 +141,7 @@ export default function CardSelectPage() {
 
       {showDecks && (
         <>
-          <SectionLabel>상황별 학습</SectionLabel>
+          <SectionLabel>{t('deck.sectionLabel')}</SectionLabel>
           <div
             style={{
               display: 'grid',
@@ -140,7 +153,7 @@ export default function CardSelectPage() {
             {decks.map((deck, i) => (
               <button
                 key={deck.id}
-                onClick={handleDeckClick}
+                onClick={() => handleDeckClick(deck.keywords)}
                 style={{
                   width: '100%',
                   height: 148,
@@ -180,7 +193,7 @@ export default function CardSelectPage() {
                 </div>
                 <div style={{ position: 'relative' }}>
                   <div style={{ fontSize: 12, opacity: 0.85, fontWeight: 500, marginBottom: 2 }}>
-                    {deck.titleKo}
+                    {deck.defaultTitle}
                   </div>
                   <div
                     style={{
@@ -190,7 +203,7 @@ export default function CardSelectPage() {
                       lineHeight: 1.15,
                     }}
                   >
-                    {deck.title}
+                    {t(deck.titleKey)}
                   </div>
                   <div
                     style={{
@@ -204,7 +217,7 @@ export default function CardSelectPage() {
                       display: 'inline-block',
                     }}
                   >
-                    카드 {deck.count}장
+                    {t('deck.countSuffix', { count: deck.count })}
                   </div>
                 </div>
               </button>
@@ -214,7 +227,7 @@ export default function CardSelectPage() {
       )}
 
       <SectionLabel>
-        {showDecks ? '전체 카드' : '카드 목록'} · {cards.length}
+        {showDecks ? t('cards.sectionAll') : t('cards.sectionList')} · {cards.length}
       </SectionLabel>
 
       <div
@@ -227,13 +240,51 @@ export default function CardSelectPage() {
       >
         {loading && <ListSkeleton />}
         {!loading && error && (
-          <ErrorPanel
-            message={userMessageFor(error.code, error.message)}
-            onRetry={reload}
-          />
+          <div
+            data-testid="cards-error"
+            style={{
+              padding: '20px 16px',
+              textAlign: 'center',
+              background: '#FEF2F2',
+              borderRadius: tokens.radiusMd,
+              border: '1px solid #FECACA',
+              color: '#991B1B',
+            }}
+          >
+            <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>
+              {t(errorI18nKey(error.code))}
+            </div>
+            <button
+              onClick={reload}
+              style={{
+                padding: '8px 16px',
+                borderRadius: 999,
+                background: '#fff',
+                color: '#991B1B',
+                border: '1px solid #FECACA',
+                fontSize: 13,
+                fontWeight: 600,
+              }}
+            >
+              {t('cards.retry')}
+            </button>
+          </div>
         )}
         {!loading && !error && cards.length === 0 && (
-          <EmptyPanel />
+          <div
+            data-testid="empty-cards"
+            style={{
+              padding: '24px 16px',
+              textAlign: 'center',
+              background: '#FFFFFF',
+              borderRadius: tokens.radiusMd,
+              border: tokens.border,
+              color: '#64748B',
+              fontSize: 14,
+            }}
+          >
+            {t('cards.empty')}
+          </div>
         )}
         {!loading && !error && cards.map((card) => (
           <button
@@ -313,7 +364,7 @@ export default function CardSelectPage() {
                   flexShrink: 0,
                 }}
               >
-                {difficultyMeta[card.difficulty].label}
+                {t(`difficulty.${card.difficulty}`)}
               </div>
             )}
             <IconChevronRight size={18} style={{ color: '#CBD5E1', flexShrink: 0 }} />
@@ -362,56 +413,5 @@ function ListSkeleton() {
         />
       ))}
     </>
-  );
-}
-
-function EmptyPanel() {
-  return (
-    <div
-      data-testid="empty-cards"
-      style={{
-        padding: '24px 16px',
-        textAlign: 'center',
-        background: '#FFFFFF',
-        borderRadius: tokens.radiusMd,
-        border: tokens.border,
-        color: '#64748B',
-        fontSize: 14,
-      }}
-    >
-      이 카테고리에는 아직 카드가 없어요.
-    </div>
-  );
-}
-
-function ErrorPanel({ message, onRetry }: { message: string; onRetry: () => void }) {
-  return (
-    <div
-      data-testid="cards-error"
-      style={{
-        padding: '20px 16px',
-        textAlign: 'center',
-        background: '#FEF2F2',
-        borderRadius: tokens.radiusMd,
-        border: '1px solid #FECACA',
-        color: '#991B1B',
-      }}
-    >
-      <div style={{ fontSize: 14, fontWeight: 600, marginBottom: 10 }}>{message}</div>
-      <button
-        onClick={onRetry}
-        style={{
-          padding: '8px 16px',
-          borderRadius: 999,
-          background: '#fff',
-          color: '#991B1B',
-          border: '1px solid #FECACA',
-          fontSize: 13,
-          fontWeight: 600,
-        }}
-      >
-        다시 시도
-      </button>
-    </div>
   );
 }

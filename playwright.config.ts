@@ -11,6 +11,7 @@ export default defineConfig({
     trace: 'retain-on-failure',
     screenshot: 'only-on-failure',
     video: 'off',
+    locale: 'ko-KR',
     launchOptions: {
       executablePath: '/opt/pw-browsers/chromium-1194/chrome-linux/chrome',
       args: [

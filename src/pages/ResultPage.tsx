@@ -1,5 +1,6 @@
 import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import {
   CartesianGrid,
   Line,
@@ -8,6 +9,8 @@ import {
   Tooltip,
   XAxis,
   YAxis,
+  BarChart,
+  Bar,
 } from 'recharts';
 import { useCardStore } from '../stores/useCardStore';
 import { useHistoryStore } from '../stores/useHistoryStore';
@@ -19,7 +22,8 @@ import {
   IconSparkle,
   IconX,
 } from '../components/icons';
-import { userMessageFor } from '../api/client';
+import { errorI18nKey } from '../api/client';
+import { dailyProgress, recentAttempts } from '../lib/stats';
 
 function ScoreRing({ score }: { score: number }) {
   const size = 92;
@@ -80,8 +84,13 @@ const sectionStyle: CSSProperties = {
   boxShadow: '0 1px 3px rgba(15,23,42,0.03), 0 4px 14px -8px rgba(15,23,42,0.06)',
 };
 
+function interpolate(template: string, vars: Record<string, string | number>): string {
+  return template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? ''));
+}
+
 export default function ResultPage() {
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const {
     analysisResult,
     analysisError,
@@ -92,7 +101,12 @@ export default function ResultPage() {
     setAnalysisError,
   } = useCardStore();
   const recordAttempt = useHistoryStore((s) => s.recordAttempt);
+  const history = useHistoryStore((s) => s.history);
+  const goal = useHistoryStore((s) => s.goal);
+  const lastSeenGoalDate = useHistoryStore((s) => s.lastSeenGoalDate);
+  const markGoalSeenToday = useHistoryStore((s) => s.markGoalSeenToday);
   const recordedRef = useRef(false);
+  const navigatedToCompleteRef = useRef(false);
 
   useEffect(() => {
     if (!analysisError && (!analysisResult || !currentCard)) {
@@ -102,9 +116,30 @@ export default function ResultPage() {
     if (recordedRef.current) return;
     if (analysisResult && currentCard && analysisResult.status === 'ready') {
       recordedRef.current = true;
-      recordAttempt(currentCard.id, analysisResult.score);
+      recordAttempt({
+        cardId: currentCard.id,
+        score: analysisResult.score,
+        korean: currentCard.korean,
+        type: currentCard.type,
+      });
     }
-  }, [analysisResult, analysisError, currentCard, navigate, recordAttempt]);
+  }, [analysisResult, analysisError, currentCard, recordAttempt, navigate]);
+
+  const today = new Date();
+  const todayKeyStr = `${today.getFullYear()}-${String(today.getMonth() + 1).padStart(2, '0')}-${String(today.getDate()).padStart(2, '0')}`;
+  const progress = dailyProgress(history, goal, today);
+
+  // After recordAttempt fires, jump to /daily-complete the first time today's goal is achieved.
+  useEffect(() => {
+    if (!recordedRef.current) return;
+    if (!analysisResult || analysisResult.status !== 'ready') return;
+    if (navigatedToCompleteRef.current) return;
+    if (progress.achieved && lastSeenGoalDate !== todayKeyStr) {
+      navigatedToCompleteRef.current = true;
+      markGoalSeenToday();
+      navigate('/daily-complete', { replace: false });
+    }
+  }, [progress.achieved, lastSeenGoalDate, todayKeyStr, analysisResult, markGoalSeenToday, navigate]);
 
   if (!currentCard && !analysisError) return null;
 
@@ -124,15 +159,33 @@ export default function ResultPage() {
     navigate('/');
   };
 
-  // Error path (network/server error)
+  // Error path
   if (analysisError) {
     return (
-      <PageShell title="결과" onClose={handleClose}>
-        <ErrorBlock
-          message={userMessageFor(analysisError.code, analysisError.message)}
-          code={analysisError.code}
-        />
-        <ActionsBar onRetry={handleRetry} onNext={handleNext} primaryLabel="다시 녹음" />
+      <PageShell title={t('result.title')} onClose={handleClose}>
+        <div
+          data-testid="result-error"
+          style={{
+            margin: `12px ${tokens.pad}px 0`,
+            padding: 20,
+            background: '#FEF2F2',
+            border: '1px solid #FECACA',
+            borderRadius: tokens.radiusLg,
+            color: '#991B1B',
+            animation: 'mc-fade-up 0.4s both',
+          }}
+        >
+          <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+            {t('result.errorTitle')}
+          </div>
+          <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+            {t(errorI18nKey(analysisError.code))}
+          </div>
+          <div style={{ fontSize: 11, marginTop: 8, opacity: 0.6 }}>
+            {t('result.errorCode', { code: analysisError.code })}
+          </div>
+        </div>
+        <ActionsBar onRetry={handleRetry} onNext={handleNext} />
       </PageShell>
     );
   }
@@ -141,28 +194,192 @@ export default function ResultPage() {
 
   const r = analysisResult;
 
-  // retry / discarded — degraded UI
+  // retry / discarded
   if (r.status === 'retry' || r.status === 'discarded') {
+    const isRetry = r.status === 'retry';
     return (
-      <PageShell title="결과" onClose={handleClose}>
-        <StatusBanner status={r.status} message={r.statusMessage} />
-        <FeedbackBubble text={r.aiFeedback} />
+      <PageShell title={t('result.title')} onClose={handleClose}>
+        <div
+          data-testid={isRetry ? 'retry-banner' : 'discarded-banner'}
+          style={{
+            margin: `12px ${tokens.pad}px 0`,
+            padding: 20,
+            background: isRetry ? '#FFFBEB' : '#FEF2F2',
+            border: `1px solid ${isRetry ? '#FDE68A' : '#FECACA'}`,
+            borderRadius: tokens.radiusLg,
+            color: isRetry ? '#B45309' : '#991B1B',
+            display: 'flex',
+            gap: 12,
+            alignItems: 'flex-start',
+            animation: 'mc-fade-up 0.4s both',
+          }}
+        >
+          <div style={{ flexShrink: 0, marginTop: 2 }}>
+            <IconAlert size={22} stroke={2.2} />
+          </div>
+          <div>
+            <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
+              {isRetry ? t('result.retryBannerTitle') : t('result.discardedBannerTitle')}
+            </div>
+            <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+              {isRetry ? t('result.retryBannerBody') : t('result.discardedBannerBody')}
+            </div>
+            {r.statusMessage && (
+              <div style={{ fontSize: 12, marginTop: 8, opacity: 0.8 }}>
+                {t('result.detail')}: {r.statusMessage}
+              </div>
+            )}
+          </div>
+        </div>
+        <FeedbackBubble text={resolveFeedback(t, r.aiFeedback)} />
         <ActionsBar onRetry={handleRetry} onNext={handleNext} />
       </PageShell>
     );
   }
 
-  // ready — full result
+  // ready
   const correctCount = r.phonemes.filter((p) => p.correct).length;
   const wrongPhoneme = r.phonemes.find((p) => !p.correct);
+  const attempts = recentAttempts(history, String(currentCard.id));
 
   return (
-    <PageShell title="결과" onClose={handleClose}>
-      <ScoreCard
-        score={r.score}
-        message={r.message}
-        koSentence={currentCard.korean}
-      />
+    <PageShell title={t('result.title')} onClose={handleClose}>
+      <div
+        data-testid="score-card"
+        style={{
+          margin: `8px ${tokens.pad}px 0`,
+          padding: 24,
+          background: tokens.primaryGrad,
+          borderRadius: tokens.radiusLg,
+          color: '#fff',
+          display: 'flex',
+          alignItems: 'center',
+          gap: 20,
+          boxShadow: `0 16px 36px -10px ${tokens.primaryShadow}`,
+          position: 'relative',
+          overflow: 'hidden',
+          animation: 'mc-flip-in 0.6s cubic-bezier(.2,.8,.2,1) both',
+          perspective: 800,
+          transformStyle: 'preserve-3d',
+        }}
+      >
+        <div
+          style={{
+            position: 'absolute',
+            top: -50,
+            right: -30,
+            width: 160,
+            height: 160,
+            borderRadius: '50%',
+            background: 'rgba(255,255,255,0.12)',
+          }}
+        />
+        <ScoreRing score={r.score} />
+        <div style={{ flex: 1, position: 'relative' }}>
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 600,
+              letterSpacing: 1.4,
+              textTransform: 'uppercase',
+              opacity: 0.8,
+            }}
+          >
+            {t('result.totalScore')}
+          </div>
+          <div
+            style={{
+              fontSize: 22,
+              fontWeight: 700,
+              letterSpacing: -0.4,
+              marginTop: 4,
+              lineHeight: 1.15,
+            }}
+          >
+            {t(r.message)}
+          </div>
+          <div
+            style={{
+              fontFamily: '"Noto Sans KR", system-ui',
+              fontSize: 14,
+              marginTop: 10,
+              opacity: 0.95,
+              fontWeight: 500,
+            }}
+          >
+            «{currentCard.korean}»
+          </div>
+        </div>
+      </div>
+
+      {/* Daily progress mini bar */}
+      <div
+        style={{
+          margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
+          padding: '12px 14px',
+          background: '#FFFFFF',
+          borderRadius: tokens.radiusMd,
+          border: tokens.border,
+          display: 'flex',
+          alignItems: 'center',
+          gap: 12,
+          boxShadow: tokens.shadowSm,
+        }}
+        data-testid="daily-progress"
+      >
+        <div style={{ flex: 1 }}>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              letterSpacing: 0.6,
+              textTransform: 'uppercase',
+              color: '#94A3B8',
+            }}
+          >
+            {t('result.todayProgressLabel')}
+          </div>
+          <div style={{ fontSize: 14, fontWeight: 700, marginTop: 2 }}>
+            {progress.current} / {progress.target}{' '}
+            <span style={{ fontSize: 11, color: '#94A3B8', fontWeight: 500 }}>
+              ({goal.type === 'cardCount' ? t('goal.typeCount') : t('goal.typeAvg')})
+            </span>
+          </div>
+          <div
+            style={{
+              marginTop: 6,
+              height: 6,
+              background: tokens.primarySoft,
+              borderRadius: 999,
+              overflow: 'hidden',
+            }}
+          >
+            <div
+              style={{
+                width: `${progress.ratio * 100}%`,
+                height: '100%',
+                background: tokens.primaryGradFlat,
+                borderRadius: 999,
+                transition: 'width 0.4s ease',
+              }}
+            />
+          </div>
+        </div>
+        {progress.achieved && (
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              color: '#10B981',
+              background: '#ECFDF5',
+              padding: '4px 8px',
+              borderRadius: 999,
+            }}
+          >
+            ✓
+          </div>
+        )}
+      </div>
 
       <div style={sectionStyle} data-testid="phoneme-section">
         <div
@@ -173,7 +390,9 @@ export default function ResultPage() {
             marginBottom: 14,
           }}
         >
-          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>음소 분석</div>
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>
+            {t('result.phonemeSection')}
+          </div>
           <div
             style={{
               fontSize: 12,
@@ -184,7 +403,7 @@ export default function ResultPage() {
               borderRadius: 999,
             }}
           >
-            {correctCount}/{r.phonemes.length} 정확
+            {t('result.accuracy', { correct: correctCount, total: r.phonemes.length })}
           </div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
@@ -259,29 +478,25 @@ export default function ResultPage() {
               <IconAlert size={18} stroke={2.2} />
             </div>
             <div style={{ fontSize: 13, color: '#7F1D1D', lineHeight: 1.5 }}>
-              <b style={{ fontFamily: '"Noto Sans KR", system-ui' }}>{wrongPhoneme.ko}</b> 발음이 정확하지 않아요
+              <b style={{ fontFamily: '"Noto Sans KR", system-ui' }}>{wrongPhoneme.ko}</b>{' '}
+              {t('result.correctionPrefix')}{' '}
               {wrongPhoneme.user && (
-                <>
-                  {' — '}
-                  <code style={{ background: '#FEE2E2', padding: '1px 5px', borderRadius: 4 }}>
-                    {wrongPhoneme.user}
-                  </code>
-                </>
-              )}
+                <code style={{ background: '#FEE2E2', padding: '1px 5px', borderRadius: 4 }}>
+                  {wrongPhoneme.user}
+                </code>
+              )}{' '}
+              {t('result.correctionMid')}{' '}
               {wrongPhoneme.target && (
-                <>
-                  {' '}대신{' '}
-                  <code
-                    style={{
-                      background: '#DCFCE7',
-                      color: '#065F46',
-                      padding: '1px 5px',
-                      borderRadius: 4,
-                    }}
-                  >
-                    {wrongPhoneme.target}
-                  </code>
-                </>
+                <code
+                  style={{
+                    background: '#DCFCE7',
+                    color: '#065F46',
+                    padding: '1px 5px',
+                    borderRadius: 4,
+                  }}
+                >
+                  {wrongPhoneme.target}
+                </code>
               )}
               {wrongPhoneme.note ? ` — ${wrongPhoneme.note}` : ''}.
             </div>
@@ -299,7 +514,9 @@ export default function ResultPage() {
               marginBottom: 14,
             }}
           >
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>억양</div>
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>
+              {t('result.intonation')}
+            </div>
             <div
               style={{
                 display: 'inline-flex',
@@ -314,7 +531,10 @@ export default function ResultPage() {
                 border: '1px solid rgba(245,158,11,0.2)',
               }}
             >
-              <IconAlert size={12} stroke={2.4} /> {r.intonationWarning}
+              <IconAlert size={12} stroke={2.4} />{' '}
+              {r.intonationWarning.startsWith('intonation.')
+                ? t(r.intonationWarning)
+                : r.intonationWarning}
             </div>
           </div>
           <div style={{ height: 160, margin: '0 -8px' }}>
@@ -351,7 +571,7 @@ export default function ResultPage() {
                   stroke="#10B981"
                   strokeWidth={3}
                   dot={{ r: 4, fill: '#10B981', strokeWidth: 0 }}
-                  name="원어민"
+                  name={t('result.native')}
                 />
                 <Line
                   type="monotone"
@@ -360,7 +580,7 @@ export default function ResultPage() {
                   strokeWidth={3}
                   strokeDasharray="6 5"
                   dot={{ r: 4, fill: tokens.primaryDark, strokeWidth: 0 }}
-                  name="내 목소리"
+                  name={t('result.mine')}
                 />
               </LineChart>
             </ResponsiveContainer>
@@ -376,7 +596,7 @@ export default function ResultPage() {
           >
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div style={{ width: 14, height: 3, background: '#10B981', borderRadius: 2 }} />
-              <span style={{ color: '#475569', fontWeight: 500 }}>원어민</span>
+              <span style={{ color: '#475569', fontWeight: 500 }}>{t('result.native')}</span>
             </div>
             <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
               <div
@@ -387,16 +607,82 @@ export default function ResultPage() {
                   background: `repeating-linear-gradient(90deg, ${tokens.primaryDark} 0 4px, transparent 4px 7px)`,
                 }}
               />
-              <span style={{ color: '#475569', fontWeight: 500 }}>내 목소리</span>
+              <span style={{ color: '#475569', fontWeight: 500 }}>{t('result.mine')}</span>
             </div>
           </div>
         </div>
       )}
 
-      <FeedbackBubble text={r.aiFeedback} />
+      {/* Score history mini chart */}
+      <div style={sectionStyle} data-testid="history-mini">
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 12,
+          }}
+        >
+          <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>
+            {t('result.historyTitle')}
+          </div>
+        </div>
+        {attempts.length <= 1 ? (
+          <div style={{ fontSize: 13, color: '#94A3B8' }}>{t('result.historyEmpty')}</div>
+        ) : (
+          <div style={{ height: 80 }}>
+            <ResponsiveContainer width="100%" height="100%">
+              <BarChart
+                data={attempts.slice(-10).map((a, i) => ({ i: i + 1, score: a.score }))}
+                margin={{ top: 4, right: 4, left: -32, bottom: 0 }}
+              >
+                <YAxis domain={[0, 100]} hide />
+                <Tooltip
+                  contentStyle={{
+                    background: '#0F172A',
+                    border: 'none',
+                    borderRadius: 8,
+                    fontSize: 11,
+                    color: '#fff',
+                  }}
+                  itemStyle={{ color: '#fff' }}
+                  labelStyle={{ color: '#A5B4FC' }}
+                />
+                <Bar dataKey="score" fill={tokens.primary} radius={[4, 4, 0, 0]} />
+              </BarChart>
+            </ResponsiveContainer>
+          </div>
+        )}
+      </div>
+
+      <FeedbackBubble text={resolveFeedback(t, r.aiFeedback)} />
       <ActionsBar onRetry={handleRetry} onNext={handleNext} />
     </PageShell>
   );
+}
+
+// Resolve a feedback descriptor produced by the analyzer:
+//   "feedback.perfect|<ref>"            → t('feedback.perfect', { ref })
+//   "feedback.imperfect|<ko>|<score>|<note>"
+//   plain string → returned as-is
+function resolveFeedback(
+  t: (key: string, vars?: Record<string, string | number>) => string,
+  descriptor: string,
+): string {
+  if (!descriptor) return '';
+  if (descriptor === 'feedback.retry' || descriptor === 'feedback.discarded') {
+    return t(descriptor);
+  }
+  const [head, ...rest] = descriptor.split('|');
+  if (head === 'feedback.perfect') {
+    return t('feedback.perfect', { ref: rest[0] ?? '' });
+  }
+  if (head === 'feedback.imperfect') {
+    const [ko = '', score = '0', note = ''] = rest;
+    const noteSuffix = note ? interpolate(t('feedback.noteSuffix'), { note }) : '';
+    return interpolate(t('feedback.imperfect'), { ko, score, noteSuffix });
+  }
+  return descriptor;
 }
 
 function PageShell({
@@ -408,6 +694,7 @@ function PageShell({
   onClose: () => void;
   children: ReactNode;
 }) {
+  const { t } = useTranslation();
   return (
     <div
       data-testid="result-page"
@@ -431,7 +718,7 @@ function PageShell({
         <div style={{ fontSize: 18, fontWeight: 700, letterSpacing: -0.3 }}>{title}</div>
         <button
           onClick={onClose}
-          aria-label="닫기"
+          aria-label={t('result.closeAria')}
           style={{
             width: 40,
             height: 40,
@@ -453,143 +740,8 @@ function PageShell({
   );
 }
 
-function ScoreCard({
-  score,
-  message,
-  koSentence,
-}: {
-  score: number;
-  message: string;
-  koSentence: string;
-}) {
-  return (
-    <div
-      data-testid="score-card"
-      style={{
-        margin: `8px ${tokens.pad}px 0`,
-        padding: 24,
-        background: tokens.primaryGrad,
-        borderRadius: tokens.radiusLg,
-        color: '#fff',
-        display: 'flex',
-        alignItems: 'center',
-        gap: 20,
-        boxShadow: `0 16px 36px -10px ${tokens.primaryShadow}`,
-        position: 'relative',
-        overflow: 'hidden',
-      }}
-    >
-      <div
-        style={{
-          position: 'absolute',
-          top: -50,
-          right: -30,
-          width: 160,
-          height: 160,
-          borderRadius: '50%',
-          background: 'rgba(255,255,255,0.12)',
-        }}
-      />
-      <ScoreRing score={score} />
-      <div style={{ flex: 1, position: 'relative' }}>
-        <div
-          style={{
-            fontSize: 12,
-            fontWeight: 600,
-            letterSpacing: 1.4,
-            textTransform: 'uppercase',
-            opacity: 0.8,
-          }}
-        >
-          총점
-        </div>
-        <div
-          style={{
-            fontSize: 22,
-            fontWeight: 700,
-            letterSpacing: -0.4,
-            marginTop: 4,
-            lineHeight: 1.15,
-          }}
-        >
-          {message}
-        </div>
-        <div
-          style={{
-            fontFamily: '"Noto Sans KR", system-ui',
-            fontSize: 14,
-            marginTop: 10,
-            opacity: 0.95,
-            fontWeight: 500,
-          }}
-        >
-          «{koSentence}»
-        </div>
-      </div>
-    </div>
-  );
-}
-
-function StatusBanner({ status, message }: { status: 'retry' | 'discarded'; message?: string }) {
-  const isRetry = status === 'retry';
-  return (
-    <div
-      data-testid={isRetry ? 'retry-banner' : 'discarded-banner'}
-      style={{
-        margin: `12px ${tokens.pad}px 0`,
-        padding: 20,
-        background: isRetry ? '#FFFBEB' : '#FEF2F2',
-        border: `1px solid ${isRetry ? '#FDE68A' : '#FECACA'}`,
-        borderRadius: tokens.radiusLg,
-        color: isRetry ? '#B45309' : '#991B1B',
-        display: 'flex',
-        gap: 12,
-        alignItems: 'flex-start',
-      }}
-    >
-      <div style={{ flexShrink: 0, marginTop: 2 }}>
-        <IconAlert size={22} stroke={2.2} />
-      </div>
-      <div>
-        <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
-          {isRetry ? '다시 녹음해 주세요' : '결과를 신뢰하기 어려워요'}
-        </div>
-        <div style={{ fontSize: 13, lineHeight: 1.5 }}>
-          {isRetry
-            ? '녹음에서 발화가 충분히 감지되지 않았어요. 조용한 환경에서 또렷하게 다시 녹음해 주세요.'
-            : '음성 신호가 매우 약해 분석 결과를 사용하기 어려워요. 마이크 거리와 환경을 확인해 주세요.'}
-        </div>
-        {message && (
-          <div style={{ fontSize: 12, marginTop: 8, opacity: 0.8 }}>
-            상세: {message}
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-function ErrorBlock({ message, code }: { message: string; code: string }) {
-  return (
-    <div
-      data-testid="result-error"
-      style={{
-        margin: `12px ${tokens.pad}px 0`,
-        padding: 20,
-        background: '#FEF2F2',
-        border: '1px solid #FECACA',
-        borderRadius: tokens.radiusLg,
-        color: '#991B1B',
-      }}
-    >
-      <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>분석 오류</div>
-      <div style={{ fontSize: 13, lineHeight: 1.5 }}>{message}</div>
-      <div style={{ fontSize: 11, marginTop: 8, opacity: 0.6 }}>코드: {code}</div>
-    </div>
-  );
-}
-
 function FeedbackBubble({ text }: { text: string }) {
+  const { t } = useTranslation();
   return (
     <div style={sectionStyle} data-testid="ai-bubble">
       <div style={{ display: 'flex', gap: 10, alignItems: 'flex-start' }}>
@@ -629,7 +781,7 @@ function FeedbackBubble({ text }: { text: string }) {
               letterSpacing: 0.1,
             }}
           >
-            MalCard AI
+            {t('result.aiCoaching')}
           </div>
           {text}
         </div>
@@ -638,15 +790,8 @@ function FeedbackBubble({ text }: { text: string }) {
   );
 }
 
-function ActionsBar({
-  onRetry,
-  onNext,
-  primaryLabel = '다음 카드',
-}: {
-  onRetry: () => void;
-  onNext: () => void;
-  primaryLabel?: string;
-}) {
+function ActionsBar({ onRetry, onNext }: { onRetry: () => void; onNext: () => void }) {
+  const { t } = useTranslation();
   return (
     <div
       style={{
@@ -682,7 +827,7 @@ function ActionsBar({
           gap: 7,
         }}
       >
-        <IconRotate size={18} stroke={2.2} /> 다시 녹음
+        <IconRotate size={18} stroke={2.2} /> {t('result.actionRetry')}
       </button>
       <button
         onClick={onNext}
@@ -701,7 +846,7 @@ function ActionsBar({
           boxShadow: `0 8px 18px -6px ${tokens.primaryShadow}`,
         }}
       >
-        {primaryLabel} <IconArrowRight size={18} stroke={2.4} />
+        {t('result.actionNext')} <IconArrowRight size={18} stroke={2.4} />
       </button>
     </div>
   );

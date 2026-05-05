@@ -1,23 +1,31 @@
 import { useCallback, useEffect, useMemo } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useCardStore } from '../stores/useCardStore';
 import { useRecorder } from '../hooks/useRecorder';
 import { tokens } from '../theme/tokens';
 import { IconArrowLeft, IconMic, IconStop, IconVolume } from '../components/icons';
-import { categoryIdForType } from '../data/cards';
 
 const MAX_DURATION_MS = 12_000;
 const MIN_DURATION_MS = 800;
 
-const TYPE_LABEL: Record<string, string> = {
-  '일상문장': '일상',
-  '관용구': '관용구',
-  '상황별': '상황',
-  '단어': '단어',
+function formatTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+const TYPE_LABEL_KEY: Record<string, string> = {
+  생활문장: 'category.daily',
+  관용구: 'category.idioms',
+  상황형회화: 'category.situations',
+  기초단어: 'category.words',
 };
 
 export default function CardLearnPage() {
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   const { currentCard, setAudioBlob, currentPosition } = useCardStore();
   const recorder = useRecorder({ maxDurationMs: MAX_DURATION_MS, minDurationMs: MIN_DURATION_MS });
 
@@ -54,11 +62,11 @@ export default function CardLearnPage() {
   const recording = recorder.status === 'recording';
   const denied = recorder.status === 'denied';
   const errored = recorder.status === 'error';
-
-  // Resolve category id from backend type
-  const _categoryId = categoryIdForType(currentCard.type);
-  void _categoryId;
-  const typeLabel = TYPE_LABEL[currentCard.type] ?? currentCard.type;
+  const typeLabel = TYPE_LABEL_KEY[currentCard.type]
+    ? t(TYPE_LABEL_KEY[currentCard.type])
+    : currentCard.type;
+  const remaining = Math.max(0, MAX_DURATION_MS - recorder.durationMs);
+  const promptIsKorean = i18n.language === 'ko';
 
   return (
     <div
@@ -83,7 +91,7 @@ export default function CardLearnPage() {
         <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
           <button
             onClick={() => navigate('/')}
-            aria-label="닫기"
+            aria-label={t('learn.closeAria')}
             style={{
               width: 40,
               height: 40,
@@ -103,7 +111,7 @@ export default function CardLearnPage() {
             {typeLabel}
           </div>
           <div style={{ fontSize: 13, color: '#64748B', fontWeight: 500 }}>
-            {position.index} / {position.total}
+            {t('learn.progress', { idx: position.index, total: position.total })}
           </div>
         </div>
         <div
@@ -126,7 +134,10 @@ export default function CardLearnPage() {
         </div>
       </div>
 
+      {/* Flashcard with flip-in animation keyed on card id */}
       <div
+        key={currentCard.id}
+        data-testid="flashcard"
         style={{
           margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
           padding: `${tokens.pad + 12}px ${tokens.pad + 4}px ${tokens.pad + 8}px`,
@@ -138,6 +149,9 @@ export default function CardLearnPage() {
           flexDirection: 'column',
           alignItems: 'center',
           textAlign: 'center',
+          perspective: 800,
+          animation: 'mc-flip-in 0.55s cubic-bezier(.2,.8,.2,1) both',
+          transformStyle: 'preserve-3d',
         }}
       >
         <div
@@ -186,7 +200,7 @@ export default function CardLearnPage() {
         <div style={{ fontSize: 16, color: '#475569', marginTop: 14, fontWeight: 500 }}>
           {currentCard.russian}
         </div>
-        {currentCard.prompt_question && (
+        {promptIsKorean && currentCard.prompt_question && (
           <div style={{ fontSize: 13, color: '#94A3B8', marginTop: 6 }}>
             {currentCard.prompt_question}
           </div>
@@ -207,11 +221,11 @@ export default function CardLearnPage() {
             boxShadow: '0 4px 14px -2px rgba(15,23,42,0.25)',
           }}
         >
-          <IconVolume size={18} stroke={2.2} /> 예문 듣기
+          <IconVolume size={18} stroke={2.2} /> {t('learn.exampleAudio')}
         </button>
       </div>
 
-      {currentCard.phonemes && currentCard.phonemes.length > 0 && (
+      {currentCard.phoneme_focus && (
         <div
           style={{
             margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
@@ -231,38 +245,33 @@ export default function CardLearnPage() {
               marginBottom: 12,
             }}
           >
-            발음 힌트
+            {t('learn.phonemeHints')}
           </div>
           <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
-            {currentCard.phonemes.map((p, i) => (
-              <div
-                key={i}
-                style={{
-                  display: 'inline-flex',
-                  alignItems: 'center',
-                  gap: 6,
-                  padding: '7px 12px',
-                  borderRadius: 999,
-                  background: '#F8FAFC',
-                  border: '1px solid #E2E8F0',
-                  fontSize: 13,
-                }}
-              >
-                <span
+            {currentCard.phoneme_focus.split(/[,，·]/).map((chunk, i) => {
+              const txt = chunk.trim();
+              if (!txt) return null;
+              return (
+                <div
+                  key={i}
                   style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '7px 12px',
+                    borderRadius: 999,
+                    background: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    fontSize: 13,
                     fontFamily: '"Noto Sans KR", system-ui',
-                    fontSize: 14,
                     fontWeight: 600,
-                    color: '#0F172A',
+                    color: tokens.primaryDark,
                   }}
                 >
-                  {p.ko}
-                </span>
-                <span style={{ color: tokens.primaryDark, fontSize: 12, fontWeight: 500 }}>
-                  {p.ipa}
-                </span>
-              </div>
-            ))}
+                  {txt}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
@@ -296,43 +305,61 @@ export default function CardLearnPage() {
           }}
         >
           {denied
-            ? '마이크 권한을 허용해 주세요'
+            ? t('learn.micDenied')
             : errored
-              ? recorder.errorMessage ?? '녹음을 시작할 수 없어요'
+              ? recorder.errorMessage ?? t('learn.micError')
               : recording
-                ? '녹음 중… 다시 눌러 정지'
-                : '눌러서 말하기'}
+                ? t('learn.micRecording')
+                : t('learn.micPrompt')}
         </div>
 
         {recording && (
-          <div
-            data-testid="recording-wave"
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              gap: 4,
-              marginBottom: 14,
-              height: 24,
-            }}
-          >
-            {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
-              <div
-                key={i}
-                style={{
-                  width: 3,
-                  height: 24,
-                  borderRadius: 2,
-                  background: '#EF4444',
-                  animation: `mc-wave 0.${6 + (i % 3)}s ease-in-out ${i * 0.06}s infinite`,
-                }}
-              />
-            ))}
-          </div>
+          <>
+            <div
+              data-testid="recording-wave"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                marginBottom: 8,
+                height: 24,
+              }}
+            >
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 3,
+                    height: 24,
+                    borderRadius: 2,
+                    background: '#EF4444',
+                    animation: `mc-wave 0.${6 + (i % 3)}s ease-in-out ${i * 0.06}s infinite`,
+                  }}
+                />
+              ))}
+            </div>
+            <div
+              data-testid="record-timer"
+              style={{
+                fontSize: 12,
+                color: '#64748B',
+                marginBottom: 14,
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: -0.1,
+              }}
+            >
+              <span style={{ color: '#0F172A', fontWeight: 700 }}>
+                {formatTime(recorder.durationMs)}
+              </span>
+              <span style={{ color: '#94A3B8', margin: '0 6px' }}>·</span>
+              {t('learn.remainingLabel')} {formatTime(remaining)}
+            </div>
+          </>
         )}
 
         <button
           onClick={toggleRecord}
-          aria-label={recording ? '정지' : '녹음 시작'}
+          aria-label={recording ? t('learn.stopAria') : t('learn.recordAria')}
           style={{
             width: tokens.fab,
             height: tokens.fab,

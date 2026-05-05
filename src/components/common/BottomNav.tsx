@@ -1,3 +1,4 @@
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
 import type { ComponentType } from 'react';
 import { IconHome, IconClock, IconUser } from '../icons';
@@ -10,19 +11,20 @@ interface IconCmpProps {
 
 interface Tab {
   path: string;
-  label: string;
+  i18nKey: string;
   Icon: ComponentType<IconCmpProps>;
 }
 
 const tabs: Tab[] = [
-  { path: '/', label: '홈', Icon: IconHome },
-  { path: '/history', label: '기록', Icon: IconClock },
-  { path: '/profile', label: '프로필', Icon: IconUser },
+  { path: '/', i18nKey: 'nav.home', Icon: IconHome },
+  { path: '/history', i18nKey: 'nav.history', Icon: IconClock },
+  { path: '/profile', i18nKey: 'nav.profile', Icon: IconUser },
 ];
 
 export default function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   return (
     <div
@@ -42,7 +44,7 @@ export default function BottomNav() {
         zIndex: 30,
       }}
     >
-      {tabs.map(({ path, label, Icon }) => {
+      {tabs.map(({ path, i18nKey, Icon }) => {
         const active = location.pathname === path;
         return (
           <button
@@ -65,7 +67,7 @@ export default function BottomNav() {
                 letterSpacing: -0.1,
               }}
             >
-              {label}
+              {t(i18nKey)}
             </span>
           </button>
         );

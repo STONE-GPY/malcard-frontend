@@ -14,8 +14,8 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     await expect(page.getByRole('heading', { name: 'MalCard' })).toBeVisible();
     await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
     await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
-    await expect(page.getByText('안녕하세요')).toBeVisible();
-    await expect(page.getByText('Здравствуйте')).toBeVisible();
+    await expect(page.getByText('어디서 내려요?')).toBeVisible();
+    await expect(page.getByText('Где выходить?')).toBeVisible();
   });
 
   test('Category filter sends type query and updates list', async ({ page }) => {
@@ -29,16 +29,14 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     });
 
     await page.goto('/');
-    await page.getByRole('button', { name: '상황', exact: true }).click();
-    // Wait for the second cards request with type=상황별
+    await page.locator('[data-testid="category-situations"]').click();
     await expect.poll(() => cardsRequests.some((s) => s.includes('type='))).toBe(true);
     await expect(page.locator('[data-testid="card-row"]')).toHaveCount(1);
-    await expect(page.getByText('어디가 아프세요?')).toBeVisible();
+    await expect(page.getByText('병원 접수 어떻게 해요?')).toBeVisible();
   });
 
   test('Cards endpoint failure shows error panel with retry', async ({ page }) => {
     const cardsRoute = /\/api\.test\/cards/;
-    // Phase 1 — every request returns 500
     await page.route(cardsRoute, async (route) => {
       await route.fulfill({
         status: 500,
@@ -69,10 +67,11 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
   test('Full flow: record → loading → ready result with mapped score/phonemes/intonation', async ({ page }) => {
     await mockBackend(page, { analysis: READY_RESPONSE });
     await page.goto('/');
-    await clickCardByText(page, '어디가 아프세요?');
+    await clickCardByText(page, '병원 접수 어떻게 해요?');
     await expect(page).toHaveURL(/\/learn$/);
     await page.getByRole('button', { name: '녹음 시작' }).click();
     await expect(page.locator('[data-testid="recording-wave"]')).toBeVisible();
+    await expect(page.locator('[data-testid="record-timer"]')).toBeVisible();
     await page.waitForTimeout(1000);
     await page.getByRole('button', { name: '정지' }).click();
 
@@ -81,20 +80,23 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
 
     await page.waitForURL(/\/result$/, { timeout: 10_000 });
     await expect(page.locator('[data-testid="score-card"]')).toBeVisible();
-    // overall: 84 → score "84" rendered in the ring
+    // overall: 84
     await expect(page.locator('[data-testid="score-card"]')).toContainText('84');
-    // 6/7 correct (one issue on '프')
-    await expect(page.locator('[data-testid="phoneme-section"]')).toContainText('6/7');
+    // 8/9 correct (one issue on '게')
+    await expect(page.locator('[data-testid="phoneme-section"]')).toContainText('8/9');
     // intonation panel rendered (prosody_executed=true)
     await expect(page.locator('[data-testid="intonation-section"]')).toBeVisible();
-    // wrong phoneme highlighted
-    await expect(page.locator('[data-testid="phoneme-section"]')).toContainText('격음 ㅍ로');
+    // history mini chart and daily progress always rendered for ready
+    await expect(page.locator('[data-testid="history-mini"]')).toBeVisible();
+    await expect(page.locator('[data-testid="daily-progress"]')).toBeVisible();
+    // wrong phoneme note surfaced
+    await expect(page.locator('[data-testid="phoneme-section"]')).toContainText('모음 ㅔ');
   });
 
   test('retry status shows retry banner and hides intonation panel', async ({ page }) => {
     await mockBackend(page, { analysis: RETRY_RESPONSE });
     await page.goto('/');
-    await clickCardByText(page, '어디가 아프세요?');
+    await clickCardByText(page, '병원 접수 어떻게 해요?');
     await page.getByRole('button', { name: '녹음 시작' }).click();
     await page.waitForTimeout(800);
     await page.getByRole('button', { name: '정지' }).click();
@@ -104,12 +106,13 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     await expect(page.locator('[data-testid="retry-banner"]')).toContainText('다시 녹음');
     await expect(page.locator('[data-testid="score-card"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="intonation-section"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="phoneme-section"]')).toHaveCount(0);
   });
 
   test('discarded status shows discarded banner', async ({ page }) => {
     await mockBackend(page, { analysis: DISCARDED_RESPONSE });
     await page.goto('/');
-    await clickCardByText(page, '어디가 아프세요?');
+    await clickCardByText(page, '병원 접수 어떻게 해요?');
     await page.getByRole('button', { name: '녹음 시작' }).click();
     await page.waitForTimeout(800);
     await page.getByRole('button', { name: '정지' }).click();
@@ -124,7 +127,7 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
       analysisError: { status: 400, code: 'INVALID_AUDIO', message: 'bad audio' },
     });
     await page.goto('/');
-    await clickCardByText(page, '안녕하세요');
+    await clickCardByText(page, '어디서 내려요?');
     await page.getByRole('button', { name: '녹음 시작' }).click();
     await page.waitForTimeout(800);
     await page.getByRole('button', { name: '정지' }).click();
@@ -153,14 +156,63 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     });
 
     await page.goto('/');
-    await clickCardByText(page, '안녕하세요');
+    await clickCardByText(page, '어디서 내려요?');
     await page.getByRole('button', { name: '녹음 시작' }).click();
     await page.waitForTimeout(800);
     await page.getByRole('button', { name: '정지' }).click();
     await page.waitForURL(/\/result$/, { timeout: 10_000 });
 
     expect(received.audio).toBe('present');
-    expect(received.text).toBe('안녕하세요');
+    expect(received.text).toBe('어디서 내려요?');
     expect(received.profile).toBe('ru');
+  });
+
+  test('Language picker switches UI text', async ({ page }) => {
+    await mockBackend(page);
+    await page.goto('/profile');
+    // Open language modal
+    await page.getByText('앱 언어').click();
+    await page.locator('[data-testid="lang-en"]').click();
+    // Modal closed and Profile labels are now English
+    await expect(page.getByText('Settings')).toBeVisible();
+    await expect(page.getByText('App language')).toBeVisible();
+  });
+
+  test('Daily goal modal updates target', async ({ page }) => {
+    await mockBackend(page);
+    await page.goto('/profile');
+    await page.getByText('일일 학습 목표').click();
+    await page.locator('[data-testid="goal-type-avgScore"]').click();
+    const slider = page.locator('[data-testid="goal-target"]');
+    await slider.evaluate((el: HTMLInputElement) => {
+      const setter = Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, 'value')!.set!;
+      setter.call(el, '90');
+      el.dispatchEvent(new Event('input', { bubbles: true }));
+    });
+    await page.locator('[data-testid="goal-save"]').click();
+    await expect(page.getByText(/평균 90점/)).toBeVisible();
+  });
+
+  test('History page is empty before practice', async ({ page }) => {
+    await mockBackend(page);
+    await page.goto('/history');
+    await expect(page.locator('[data-testid="history-empty"]')).toBeVisible();
+  });
+
+  test('History page reflects an attempt after practice', async ({ page }) => {
+    await mockBackend(page, { analysis: READY_RESPONSE });
+    await page.goto('/');
+    await clickCardByText(page, '병원 접수 어떻게 해요?');
+    await page.getByRole('button', { name: '녹음 시작' }).click();
+    await page.waitForTimeout(800);
+    await page.getByRole('button', { name: '정지' }).click();
+    await page.waitForURL(/\/result$/, { timeout: 10_000 });
+    // Wait for score card so recordAttempt has fired before we navigate.
+    await expect(page.locator('[data-testid="score-card"]')).toBeVisible();
+    await page.waitForTimeout(200);
+
+    await page.goto('/history');
+    await expect(page.locator('[data-testid="history-session"]').first()).toBeVisible();
+    await expect(page.locator('[data-testid="history-session"]')).toContainText('병원 접수');
   });
 });
