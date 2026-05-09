@@ -1,22 +1,22 @@
 import { create } from 'zustand';
-import type { Card, CardCategory, AnalysisResult, AnalysisStep } from '../types';
-import { cards } from '../data/cards';
+import type { Card, CategoryId, AnalysisResult, AnalysisStep } from '../types';
 
 interface CardStore {
-  // Card selection
-  selectedCategory: CardCategory | 'all';
-  setCategory: (category: CardCategory | 'all') => void;
-  filteredCards: () => Card[];
+  // Filter
+  selectedCategory: CategoryId;
+  setCategory: (category: CategoryId) => void;
 
-  // Learning
+  // Current card (the page that lists cards owns the list; store only holds the chosen one)
   currentCard: Card | null;
-  currentIndex: number;
   setCurrentCard: (card: Card) => void;
+
+  // Sequencing within current category list (provided by caller)
+  cardList: Card[];
+  setCardList: (list: Card[]) => void;
   nextCard: () => void;
+  currentPosition: () => { index: number; total: number };
 
   // Recording
-  isRecording: boolean;
-  setIsRecording: (recording: boolean) => void;
   audioBlob: Blob | null;
   setAudioBlob: (blob: Blob | null) => void;
 
@@ -25,32 +25,44 @@ interface CardStore {
   setAnalysisStep: (step: AnalysisStep) => void;
   analysisResult: AnalysisResult | null;
   setAnalysisResult: (result: AnalysisResult | null) => void;
+  analysisError: { code: string; message: string } | null;
+  setAnalysisError: (err: { code: string; message: string } | null) => void;
+}
+
+interface WindowWithStore extends Window {
+  __cardStore?: typeof useCardStore;
 }
 
 export const useCardStore = create<CardStore>((set, get) => ({
   selectedCategory: 'all',
   setCategory: (category) => set({ selectedCategory: category }),
-  filteredCards: () => {
-    const { selectedCategory } = get();
-    if (selectedCategory === 'all') return cards;
-    return cards.filter((c) => c.category === selectedCategory);
-  },
 
   currentCard: null,
-  currentIndex: 0,
-  setCurrentCard: (card) => {
-    const index = cards.findIndex((c) => c.id === card.id);
-    set({ currentCard: card, currentIndex: index });
-  },
+  setCurrentCard: (card) => set({ currentCard: card }),
+
+  cardList: [],
+  setCardList: (list) => set({ cardList: list }),
+
   nextCard: () => {
-    const { currentIndex, filteredCards } = get();
-    const filtered = filteredCards();
-    const nextIndex = (currentIndex + 1) % filtered.length;
-    set({ currentCard: filtered[nextIndex], currentIndex: nextIndex, analysisResult: null, audioBlob: null });
+    const { currentCard, cardList } = get();
+    if (cardList.length === 0) return;
+    const idx = currentCard ? cardList.findIndex((c) => c.id === currentCard.id) : -1;
+    const nextIdx = idx >= 0 ? (idx + 1) % cardList.length : 0;
+    set({
+      currentCard: cardList[nextIdx],
+      analysisResult: null,
+      audioBlob: null,
+      analysisError: null,
+    });
   },
 
-  isRecording: false,
-  setIsRecording: (recording) => set({ isRecording: recording }),
+  currentPosition: () => {
+    const { currentCard, cardList } = get();
+    if (!currentCard || cardList.length === 0) return { index: 0, total: cardList.length };
+    const idx = cardList.findIndex((c) => c.id === currentCard.id);
+    return { index: idx >= 0 ? idx + 1 : 1, total: cardList.length };
+  },
+
   audioBlob: null,
   setAudioBlob: (blob) => set({ audioBlob: blob }),
 
@@ -58,4 +70,13 @@ export const useCardStore = create<CardStore>((set, get) => ({
   setAnalysisStep: (step) => set({ analysisStep: step }),
   analysisResult: null,
   setAnalysisResult: (result) => set({ analysisResult: result }),
+  analysisError: null,
+  setAnalysisError: (err) => set({ analysisError: err }),
 }));
+
+// Expose the store on window in dev so the in-browser dev panel and
+// integration tests can manipulate state without going through the full
+// mic/recording flow. Stripped from production builds.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as WindowWithStore).__cardStore = useCardStore;
+}

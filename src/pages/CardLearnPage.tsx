@@ -1,185 +1,432 @@
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useCardStore } from '../stores/useCardStore';
-import TopNav from '../components/common/TopNav';
-import { useRef, useCallback } from 'react';
+import { useRecorder } from '../hooks/useRecorder';
+import { tokens } from '../theme/tokens';
+import { IconArrowLeft, IconMic, IconStop, IconVolume } from '../components/icons';
+
+const MAX_DURATION_MS = 12_000;
+const MIN_DURATION_MS = 800;
+
+function formatTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+const TYPE_LABEL_KEY: Record<string, string> = {
+  생활문장: 'category.daily',
+  관용구: 'category.idioms',
+  상황형회화: 'category.situations',
+  기초단어: 'category.words',
+};
 
 export default function CardLearnPage() {
   const navigate = useNavigate();
-  const { currentCard, isRecording, setIsRecording, setAudioBlob } = useCardStore();
-  const mediaRecorderRef = useRef<MediaRecorder | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const { t, i18n } = useTranslation();
+  const { currentCard, setAudioBlob, currentPosition } = useCardStore();
+  const recorder = useRecorder({ maxDurationMs: MAX_DURATION_MS, minDurationMs: MIN_DURATION_MS });
+  const [isSpeaking, setIsSpeaking] = useState(false);
+
+  useEffect(() => {
+    if (!currentCard) navigate('/', { replace: true });
+  }, [currentCard, navigate]);
+
+  // Auto-submit when recording produces a blob
+  useEffect(() => {
+    if (recorder.status === 'preview' && recorder.audioBlob) {
+      setAudioBlob(recorder.audioBlob);
+      navigate('/loading');
+    }
+  }, [recorder.status, recorder.audioBlob, setAudioBlob, navigate]);
+
+  // Cancel any in-flight TTS when the card changes or the page unmounts.
+  // Without this, navigating away mid-playback leaves the synth speaking.
+  useEffect(() => {
+    return () => {
+      if (typeof speechSynthesis !== 'undefined') {
+        speechSynthesis.cancel();
+      }
+      setIsSpeaking(false);
+    };
+  }, [currentCard?.id]);
 
   const handleTTS = useCallback(() => {
     if (!currentCard) return;
+    if (typeof speechSynthesis === 'undefined') return;
+
+    // If something is already speaking, treat the click as a stop.
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+      speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
     const utterance = new SpeechSynthesisUtterance(currentCard.korean);
     utterance.lang = 'ko-KR';
     utterance.rate = 0.8;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    setIsSpeaking(true);
     speechSynthesis.speak(utterance);
   }, [currentCard]);
 
-  const startRecording = useCallback(async () => {
-    try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
-      const mediaRecorder = new MediaRecorder(stream);
-      mediaRecorderRef.current = mediaRecorder;
-      chunksRef.current = [];
+  const toggleRecord = useCallback(() => {
+    if (recorder.status === 'recording') recorder.stop();
+    else recorder.start();
+  }, [recorder]);
 
-      mediaRecorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
-      };
+  const position = useMemo(() => currentPosition(), [currentPosition]);
+  const pct = position.total > 0 ? (position.index / position.total) * 100 : 0;
 
-      mediaRecorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
-        stream.getTracks().forEach((t) => t.stop());
-        navigate('/loading');
-      };
+  if (!currentCard) return null;
 
-      mediaRecorder.start();
-      setIsRecording(true);
-    } catch {
-      alert('마이크 접근 권한이 필요합니다.');
-    }
-  }, [setIsRecording, setAudioBlob, navigate]);
-
-  const stopRecording = useCallback(() => {
-    if (mediaRecorderRef.current?.state === 'recording') {
-      mediaRecorderRef.current.stop();
-      setIsRecording(false);
-    }
-  }, [setIsRecording]);
-
-  if (!currentCard) {
-    navigate('/');
-    return null;
-  }
+  const recording = recorder.status === 'recording';
+  const denied = recorder.status === 'denied';
+  const errored = recorder.status === 'error';
+  const typeLabel = TYPE_LABEL_KEY[currentCard.type]
+    ? t(TYPE_LABEL_KEY[currentCard.type])
+    : currentCard.type;
+  const remaining = Math.max(0, MAX_DURATION_MS - recorder.durationMs);
+  const promptIsKorean = i18n.language === 'ko';
 
   return (
-    <div>
-      <TopNav title={currentCard.subcategory ?? '학습'} rightContent={
-        <span style={{ fontSize: 13, fontWeight: 600, color: 'var(--color-primary)' }}>1 / 4</span>
-      } />
-
-      {/* Progress Bar */}
-      <div style={{ padding: '4px 20px 20px' }}>
-        <div style={{ height: 4, background: 'var(--color-muted)', borderRadius: 4, overflow: 'hidden' }}>
-          <div style={{ height: '100%', width: '25%', background: 'var(--color-primary)', borderRadius: 4 }} />
+    <div
+      data-testid="learn-page"
+      style={{
+        // Outer is flex column; inner wrapper owns the scroll. Mic action area
+        // sits OUTSIDE the wrapper so it is always at the bottom of the page,
+        // no sticky/marginTop:auto tricks needed. Putting overflow on the same
+        // element as flex column shrinks children — see ProfilePage fix.
+        height: '100%',
+        background: tokens.bgGrad,
+        color: '#0F172A',
+        position: 'relative',
+        display: 'flex',
+        flexDirection: 'column',
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
+      <div
+        style={{
+          padding: `26px ${tokens.pad}px 14px`,
+          display: 'flex',
+          flexDirection: 'column',
+          gap: 10,
+        }}
+      >
+        <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
+          <button
+            onClick={() => navigate('/')}
+            aria-label={t('learn.closeAria')}
+            style={{
+              width: 40,
+              height: 40,
+              borderRadius: 999,
+              background: '#FFFFFF',
+              border: '1px solid rgba(15,23,42,0.06)',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              color: '#475569',
+              boxShadow: '0 1px 3px rgba(15,23,42,0.04)',
+            }}
+          >
+            <IconArrowLeft size={20} />
+          </button>
+          <div style={{ fontSize: 15, fontWeight: 600, color: '#0F172A', letterSpacing: -0.2 }}>
+            {typeLabel}
+          </div>
+          <div style={{ fontSize: 13, color: '#64748B', fontWeight: 500 }}>
+            {t('learn.progress', { idx: position.index, total: position.total })}
+          </div>
+        </div>
+        <div
+          style={{
+            height: 6,
+            background: tokens.primarySoft,
+            borderRadius: 999,
+            overflow: 'hidden',
+          }}
+        >
+          <div
+            style={{
+              height: '100%',
+              width: `${pct}%`,
+              background: tokens.primaryGradFlat,
+              borderRadius: 999,
+              transition: 'width 0.4s ease',
+            }}
+          />
         </div>
       </div>
 
-      {/* The Card */}
-      <div style={{ padding: '0 20px' }}>
-        <div style={{
-          background: 'var(--color-surface)', borderRadius: 'var(--radius-2xl)',
-          overflow: 'hidden', boxShadow: '0 2px 12px rgba(0,0,0,0.06)',
-        }}>
-          {/* Gradient stripe */}
-          <div style={{ height: 5, background: 'var(--color-primary-gradient)' }} />
-
-          <div style={{ padding: '28px 24px 24px', textAlign: 'center' }}>
-            <div style={{
-              display: 'inline-flex', alignItems: 'center', gap: 5,
-              background: 'var(--color-bg)', padding: '5px 12px', borderRadius: 16,
-              fontSize: 12, fontWeight: 600, color: 'var(--color-text-secondary)', marginBottom: 20,
-            }}>
-              {currentCard.emoji} {currentCard.subcategory ?? currentCard.category}
-            </div>
-
-            <div style={{ fontSize: 48, marginBottom: 18 }}>{currentCard.emoji}</div>
-            <div style={{ fontSize: 28, fontWeight: 900, color: '#2D2A26', marginBottom: 8, lineHeight: 1.3 }}>
-              {currentCard.korean}
-            </div>
-            <div style={{ fontSize: 14, color: 'var(--color-text-tertiary)', marginBottom: 4 }}>{currentCard.romanize}</div>
-            <div style={{ fontSize: 13, color: '#C4BEB6', marginBottom: 24 }}>{currentCard.translation}</div>
-
-            <button onClick={handleTTS} style={{
-              display: 'inline-flex', alignItems: 'center', gap: 8,
-              background: 'var(--color-primary-light)', padding: '12px 22px', borderRadius: 'var(--radius-md)',
-              fontSize: 14, fontWeight: 700, color: 'var(--color-primary)',
-            }}>
-              <svg width="18" height="18" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-                <polygon points="11 5 6 9 2 9 2 15 6 15 11 19 11 5" />
-                <path d="M15.54 8.46a5 5 0 0 1 0 7.07" />
-              </svg>
-              예시 발음 듣기
-            </button>
-          </div>
+      {/* Flashcard with flip-in animation keyed on card id */}
+      <div
+        key={currentCard.id}
+        data-testid="flashcard"
+        style={{
+          margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
+          padding: `${tokens.pad + 12}px ${tokens.pad + 4}px ${tokens.pad + 8}px`,
+          background: '#FFFFFF',
+          borderRadius: tokens.radiusXl,
+          boxShadow: `0 24px 48px -16px ${tokens.primaryShadowSoft}, 0 4px 14px -6px rgba(15,23,42,0.08)`,
+          border: '1px solid rgba(99,102,241,0.06)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          textAlign: 'center',
+          perspective: 800,
+          animation: 'mc-flip-in 0.55s cubic-bezier(.2,.8,.2,1) both',
+          transformStyle: 'preserve-3d',
+        }}
+      >
+        <div
+          style={{
+            width: tokens.emojiBig,
+            height: tokens.emojiBig,
+            borderRadius: tokens.radiusLg,
+            background: tokens.emojiBgGrad,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            fontSize: tokens.emojiBigFs,
+            marginBottom: 18,
+            filter: `drop-shadow(0 6px 12px ${tokens.primaryShadowSoft})`,
+          }}
+        >
+          {currentCard.emoji ?? '📝'}
         </div>
-      </div>
-
-      {/* Card stack shadows */}
-      <div style={{ padding: '0 20px', marginTop: -2 }}>
-        <div style={{ height: 6, margin: '0 8px', background: '#EFEBE5', borderRadius: '0 0 16px 16px' }} />
-        <div style={{ height: 4, margin: '0 16px', background: 'var(--color-muted)', borderRadius: '0 0 12px 12px' }} />
-      </div>
-
-      {/* Phoneme Hints */}
-      {currentCard.phonemeHints && (
-        <div style={{
-          margin: '20px 20px 0', background: 'var(--color-surface)', borderRadius: 'var(--radius-lg)',
-          padding: 16, border: '1px solid var(--color-border)',
-        }}>
-          <div style={{
-            fontSize: 13, fontWeight: 700, color: '#2D2A26', marginBottom: 10,
-            display: 'flex', alignItems: 'center', gap: 6,
-          }}>
-            <svg width="14" height="14" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2">
-              <circle cx="12" cy="12" r="10" />
-              <path d="M9.09 9a3 3 0 0 1 5.83 1c0 2-3 3-3 3" />
-              <line x1="12" y1="17" x2="12.01" y2="17" />
-            </svg>
-            발음 힌트
+        <h2
+          style={{
+            fontFamily: '"Noto Sans KR", system-ui, sans-serif',
+            fontSize: tokens.korean,
+            fontWeight: 700,
+            letterSpacing: -1.2,
+            lineHeight: 1.15,
+            color: '#0F172A',
+            margin: 0,
+          }}
+        >
+          {currentCard.korean}
+        </h2>
+        {currentCard.romanized && (
+          <div
+            style={{
+              fontSize: 15,
+              color: tokens.primaryDark,
+              fontStyle: 'italic',
+              marginTop: 8,
+              fontWeight: 500,
+              letterSpacing: 0.1,
+            }}
+          >
+            {currentCard.romanized}
           </div>
-          <div style={{ display: 'flex', gap: 6, flexWrap: 'wrap' }}>
-            {currentCard.phonemeHints.map((h, i) => (
-              <div key={i} style={{
-                padding: '6px 10px', borderRadius: 'var(--radius-sm)',
-                background: 'var(--color-bg)', fontSize: 13, fontWeight: 600, color: '#2D2A26',
-              }}>
-                {h.char} <span style={{ color: 'var(--color-primary)', fontSize: 11, marginLeft: 2 }}>{h.ipa}</span>
-              </div>
-            ))}
+        )}
+        <div style={{ fontSize: 16, color: '#475569', marginTop: 14, fontWeight: 500 }}>
+          {currentCard.russian}
+        </div>
+        {promptIsKorean && currentCard.prompt_question && (
+          <div style={{ fontSize: 13, color: '#94A3B8', marginTop: 6 }}>
+            {currentCard.prompt_question}
+          </div>
+        )}
+        <button
+          onClick={handleTTS}
+          aria-pressed={isSpeaking}
+          aria-label={
+            isSpeaking ? t('learn.exampleAudioStop') : t('learn.exampleAudio')
+          }
+          style={{
+            marginTop: 22,
+            display: 'inline-flex',
+            alignItems: 'center',
+            gap: 8,
+            padding: '12px 22px',
+            borderRadius: 999,
+            background: isSpeaking ? '#EF4444' : '#0F172A',
+            color: '#fff',
+            fontSize: 14,
+            fontWeight: 600,
+            boxShadow: isSpeaking
+              ? '0 4px 14px -2px rgba(239,68,68,0.45)'
+              : '0 4px 14px -2px rgba(15,23,42,0.25)',
+            transition: 'background 0.18s ease, box-shadow 0.18s ease',
+          }}
+        >
+          {isSpeaking ? (
+            <>
+              <IconStop size={18} /> {t('learn.exampleAudioStop')}
+            </>
+          ) : (
+            <>
+              <IconVolume size={18} stroke={2.2} /> {t('learn.exampleAudio')}
+            </>
+          )}
+        </button>
+      </div>
+
+      {currentCard.phoneme_focus && (
+        <div
+          style={{
+            margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
+            padding: 18,
+            background: '#FFFFFF',
+            borderRadius: tokens.radiusLg,
+            border: '1px solid rgba(15,23,42,0.05)',
+          }}
+        >
+          <div
+            style={{
+              fontSize: 12,
+              fontWeight: 700,
+              letterSpacing: 1.2,
+              textTransform: 'uppercase',
+              color: '#94A3B8',
+              marginBottom: 12,
+            }}
+          >
+            {t('learn.phonemeHints')}
+          </div>
+          <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8 }}>
+            {currentCard.phoneme_focus.split(/[,，·]/).map((chunk, i) => {
+              const txt = chunk.trim();
+              if (!txt) return null;
+              return (
+                <div
+                  key={i}
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    padding: '7px 12px',
+                    borderRadius: 999,
+                    background: '#F8FAFC',
+                    border: '1px solid #E2E8F0',
+                    fontSize: 13,
+                    fontFamily: '"Noto Sans KR", system-ui',
+                    fontWeight: 600,
+                    color: tokens.primaryDark,
+                  }}
+                >
+                  {txt}
+                </div>
+              );
+            })}
           </div>
         </div>
       )}
+      </div>
 
-      {/* Recording Section */}
-      <div style={{
-        position: 'fixed', bottom: 0, width: '100%', maxWidth: 430,
-        background: 'var(--color-surface)', borderRadius: '22px 22px 0 0',
-        padding: '20px 20px 36px', textAlign: 'center',
-        boxShadow: '0 -4px 20px rgba(0,0,0,0.05)',
-      }}>
-        <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 16 }}>
-          {isRecording ? '녹음 중... 다시 눌러서 종료' : '버튼을 누르고 따라 말해보세요'}
-        </div>
-
-        <button
-          onClick={isRecording ? stopRecording : startRecording}
+      <div
+        style={{
+          padding: '20px 24px 36px',
+          background:
+            'linear-gradient(180deg, rgba(250,250,252,0) 0%, rgba(250,250,252,0.96) 30%)',
+          backdropFilter: 'blur(12px)',
+          WebkitBackdropFilter: 'blur(12px)',
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          zIndex: 20,
+        }}
+      >
+        <div
           style={{
-            width: 64, height: 64, borderRadius: '50%',
-            background: isRecording
-              ? 'linear-gradient(135deg, #EF5350, #FF8A80)'
-              : 'var(--color-primary-gradient)',
-            display: 'inline-flex', alignItems: 'center', justifyContent: 'center',
-            boxShadow: isRecording
-              ? '0 4px 18px rgba(239,83,80,0.35)'
-              : '0 4px 18px rgba(108,92,231,0.35)',
+            fontSize: 14,
+            fontWeight: 600,
+            color: denied || errored ? '#EF4444' : recording ? '#EF4444' : '#475569',
+            marginBottom: 14,
+            letterSpacing: -0.1,
+            textAlign: 'center',
           }}
         >
-          {isRecording ? (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="white"><rect x="6" y="6" width="12" height="12" rx="2" /></svg>
-          ) : (
-            <svg width="24" height="24" viewBox="0 0 24 24" fill="white">
-              <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-              <path d="M19 10v2a7 7 0 0 1-14 0v-2" fill="none" stroke="white" strokeWidth="2" />
-              <line x1="12" y1="19" x2="12" y2="23" stroke="white" strokeWidth="2" />
-            </svg>
-          )}
-        </button>
-        <div style={{ marginTop: 10, fontSize: 11, color: 'var(--color-text-tertiary)' }}>
-          {isRecording ? '탭하여 녹음 종료' : '탭하여 녹음 시작'}
+          {denied
+            ? t('learn.micDenied')
+            : errored
+              ? recorder.errorMessage ?? t('learn.micError')
+              : recording
+                ? t('learn.micRecording')
+                : t('learn.micPrompt')}
         </div>
+
+        {recording && (
+          <>
+            <div
+              data-testid="recording-wave"
+              style={{
+                display: 'flex',
+                alignItems: 'center',
+                gap: 4,
+                marginBottom: 8,
+                height: 24,
+              }}
+            >
+              {[0, 1, 2, 3, 4, 5, 6, 7, 8].map((i) => (
+                <div
+                  key={i}
+                  style={{
+                    width: 3,
+                    height: 24,
+                    borderRadius: 2,
+                    background: '#EF4444',
+                    animation: `mc-wave 0.${6 + (i % 3)}s ease-in-out ${i * 0.06}s infinite`,
+                  }}
+                />
+              ))}
+            </div>
+            <div
+              data-testid="record-timer"
+              style={{
+                fontSize: 12,
+                color: '#64748B',
+                marginBottom: 14,
+                fontVariantNumeric: 'tabular-nums',
+                letterSpacing: -0.1,
+              }}
+            >
+              <span style={{ color: '#0F172A', fontWeight: 700 }}>
+                {formatTime(recorder.durationMs)}
+              </span>
+              <span style={{ color: '#94A3B8', margin: '0 6px' }}>·</span>
+              {t('learn.remainingLabel')} {formatTime(remaining)}
+            </div>
+          </>
+        )}
+
+        <button
+          onClick={toggleRecord}
+          aria-label={recording ? t('learn.stopAria') : t('learn.recordAria')}
+          style={{
+            width: tokens.fab,
+            height: tokens.fab,
+            borderRadius: '50%',
+            background: recording
+              ? 'linear-gradient(135deg, #F87171 0%, #EF4444 60%, #DC2626 100%)'
+              : tokens.primaryGrad,
+            color: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            boxShadow: recording
+              ? '0 12px 28px -4px rgba(239,68,68,0.55)'
+              : `0 12px 28px -4px ${tokens.primaryShadow}, 0 4px 12px -2px ${tokens.primaryShadowSoft}`,
+            animation: recording ? 'mc-pulse 1.4s infinite' : 'none',
+          }}
+        >
+          {recording ? <IconStop size={28} /> : <IconMic size={32} stroke={2.2} />}
+        </button>
       </div>
     </div>
   );

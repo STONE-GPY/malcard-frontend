@@ -1,78 +1,77 @@
+import { useTranslation } from 'react-i18next';
 import { useLocation, useNavigate } from 'react-router-dom';
+import type { ComponentType } from 'react';
+import { IconHome, IconClock, IconUser } from '../icons';
+import { tokens } from '../../theme/tokens';
 
-const tabs = [
-  {
-    path: '/',
-    label: '카드',
-    icon: (active: boolean) => (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill={active ? 'currentColor' : 'none'} stroke="currentColor" strokeWidth="2">
-        <rect x="3" y="3" width="7" height="7" rx="2" />
-        <rect x="14" y="3" width="7" height="7" rx="2" />
-        <rect x="3" y="14" width="7" height="7" rx="2" />
-        <rect x="14" y="14" width="7" height="7" rx="2" />
-      </svg>
-    ),
-  },
-  {
-    path: '/learn',
-    label: '연습',
-    icon: (_active: boolean) => (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-        <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-      </svg>
-    ),
-  },
-  {
-    path: '/history',
-    label: '기록',
-    icon: (_active: boolean) => (
-      <svg width="22" height="22" viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="2">
-        <circle cx="12" cy="12" r="10" />
-        <polyline points="12 6 12 12 16 14" />
-      </svg>
-    ),
-  },
+interface IconCmpProps {
+  size?: number;
+  stroke?: number;
+}
+
+interface Tab {
+  path: string;
+  i18nKey: string;
+  Icon: ComponentType<IconCmpProps>;
+}
+
+const tabs: Tab[] = [
+  { path: '/', i18nKey: 'nav.home', Icon: IconHome },
+  { path: '/history', i18nKey: 'nav.history', Icon: IconClock },
+  { path: '/profile', i18nKey: 'nav.profile', Icon: IconUser },
 ];
 
 export default function BottomNav() {
   const location = useLocation();
   const navigate = useNavigate();
+  const { t } = useTranslation();
 
   return (
-    <nav style={{
-      position: 'fixed',
-      bottom: 0,
-      width: '100%',
-      maxWidth: 430,
-      background: 'var(--color-surface)',
-      borderTop: '1px solid var(--color-border)',
-      display: 'flex',
-      justifyContent: 'space-around',
-      padding: '10px 0 28px',
-      zIndex: 100,
-    }}>
-      {tabs.map((tab) => {
-        const active = location.pathname === tab.path;
+    <div
+      style={{
+        position: 'sticky',
+        bottom: 0,
+        left: 0,
+        right: 0,
+        marginTop: 'auto',
+        padding: '10px 24px 30px',
+        background: 'rgba(255,255,255,0.85)',
+        backdropFilter: 'blur(20px) saturate(180%)',
+        WebkitBackdropFilter: 'blur(20px) saturate(180%)',
+        borderTop: '1px solid rgba(15,23,42,0.06)',
+        display: 'flex',
+        justifyContent: 'space-around',
+        zIndex: 30,
+      }}
+    >
+      {tabs.map(({ path, i18nKey, Icon }) => {
+        const active = location.pathname === path;
         return (
           <button
-            key={tab.path}
-            onClick={() => navigate(tab.path)}
+            key={path}
+            onClick={() => navigate(path)}
             style={{
               display: 'flex',
               flexDirection: 'column',
               alignItems: 'center',
               gap: 3,
-              fontSize: 10,
-              fontWeight: 600,
-              color: active ? 'var(--color-primary)' : '#B5AFA7',
+              padding: '4px 12px',
+              color: active ? tokens.primary : '#94A3B8',
             }}
           >
-            {tab.icon(active)}
-            <span>{tab.label}</span>
+            <Icon size={24} stroke={active ? 2.4 : 2} />
+            <span
+              style={{
+                fontSize: 11,
+                fontWeight: active ? 600 : 500,
+                letterSpacing: -0.1,
+              }}
+            >
+              {t(i18nKey)}
+            </span>
           </button>
         );
       })}
-    </nav>
+    </div>
   );
 }

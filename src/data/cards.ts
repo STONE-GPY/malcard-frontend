@@ -1,116 +1,327 @@
-import type { Card, SituationGroup } from '../types';
+import type { Card, CategoryId, AnalysisResult, EvaluationStatus } from '../types';
 
-export const situationGroups: SituationGroup[] = [
-  { id: 'hospital', title: '병원 접수', emoji: '🏥', cardCount: 8, color: 'indigo' },
-  { id: 'transport', title: '대중교통', emoji: '🚌', cardCount: 12, color: 'orange' },
-  { id: 'mart', title: '마트 계산', emoji: '🛒', cardCount: 6, color: 'teal' },
+export interface CategoryDef {
+  id: CategoryId;
+  labelKey: string;
+  apiType?: string;
+}
+
+// Aligned with backend type values from the real card dataset.
+export const categories: CategoryDef[] = [
+  { id: 'all', labelKey: 'category.all' },
+  { id: 'daily', labelKey: 'category.daily', apiType: '생활문장' },
+  { id: 'idioms', labelKey: 'category.idioms', apiType: '관용구' },
+  { id: 'situations', labelKey: 'category.situations', apiType: '상황형회화' },
+  { id: 'words', labelKey: 'category.words', apiType: '기초단어' },
 ];
 
-export const cards: Card[] = [
+export function categoryIdForType(type: string): Exclude<CategoryId, 'all'> {
+  const found = categories.find((c) => c.apiType === type);
+  return (found?.id ?? 'daily') as Exclude<CategoryId, 'all'>;
+}
+
+// Emoji derivation: keyword scan over card.korean, fall back to per-type default.
+const KEYWORD_EMOJI: { kw: string; emoji: string }[] = [
+  { kw: '버스', emoji: '🚌' },
+  { kw: '지하철', emoji: '🚇' },
+  { kw: '환승', emoji: '🔁' },
+  { kw: '출구', emoji: '🚪' },
+  { kw: '계단', emoji: '🪜' },
+  { kw: '공항', emoji: '✈️' },
+  { kw: '학교', emoji: '🏫' },
+  { kw: '은행', emoji: '🏦' },
+  { kw: '우체국', emoji: '📮' },
+  { kw: '경찰', emoji: '👮' },
+  { kw: '병원', emoji: '🏥' },
+  { kw: '약국', emoji: '💊' },
+  { kw: '약', emoji: '💊' },
+  { kw: '편의점', emoji: '🏪' },
+  { kw: '식당', emoji: '🍽️' },
+  { kw: '마트', emoji: '🛒' },
+  { kw: '카드', emoji: '💳' },
+  { kw: '계산', emoji: '💳' },
+  { kw: '봉투', emoji: '🛍️' },
+  { kw: '영수증', emoji: '🧾' },
+  { kw: '비밀번호', emoji: '🔒' },
+  { kw: '와이파이', emoji: '📶' },
+  { kw: '환불', emoji: '↩️' },
+  { kw: '할인', emoji: '🏷️' },
+  { kw: '예약', emoji: '📋' },
+  { kw: '주문', emoji: '🧑‍🍳' },
+  { kw: '사이즈', emoji: '📏' },
+  { kw: '색깔', emoji: '🎨' },
+  { kw: '짐', emoji: '🧳' },
+  { kw: '버튼', emoji: '🔘' },
+  { kw: '자리', emoji: '🪑' },
+  { kw: '포장', emoji: '🥡' },
+  { kw: '날씨', emoji: '☀️' },
+  { kw: '비', emoji: '🌧️' },
+  { kw: '시간', emoji: '⏰' },
+  { kw: '시예요', emoji: '⏰' },
+  { kw: '몇 시', emoji: '⏰' },
+  { kw: '전화', emoji: '📞' },
+  { kw: '이름', emoji: '🪪' },
+  { kw: '화장실', emoji: '🚻' },
+  { kw: '물', emoji: '💧' },
+  { kw: '밥', emoji: '🍚' },
+  { kw: '배', emoji: '🍱' },
+  { kw: '죽', emoji: '🥣' },
+  { kw: '손', emoji: '✋' },
+  { kw: '발', emoji: '🦶' },
+  { kw: '눈', emoji: '👁️' },
+  { kw: '귀', emoji: '👂' },
+  { kw: '입', emoji: '👄' },
+  { kw: '머리', emoji: '🧠' },
+  { kw: '마음', emoji: '💗' },
+  { kw: '감사', emoji: '🙏' },
+  { kw: '죄송', emoji: '🙇' },
+  { kw: '잠깐', emoji: '⏳' },
+  { kw: '천천히', emoji: '🐢' },
+  { kw: '다시', emoji: '🔁' },
+  { kw: '모르', emoji: '🤷' },
+  { kw: '어디', emoji: '📍' },
+  { kw: '얼마', emoji: '💰' },
+  { kw: '괜찮', emoji: '👌' },
+  { kw: '없', emoji: '🚫' },
+  { kw: '주세요', emoji: '🙏' },
+];
+
+const TYPE_EMOJI: Record<string, string> = {
+  생활문장: '💬',
+  관용구: '🐯',
+  상황형회화: '🎯',
+  기초단어: '📚',
+};
+
+export function emojiForCard(card: { type: string; korean: string }): string {
+  for (const { kw, emoji } of KEYWORD_EMOJI) {
+    if (card.korean.includes(kw)) return emoji;
+  }
+  return TYPE_EMOJI[card.type] ?? '📝';
+}
+
+// Difficulty heuristic: word count + presence of 받침/쌍자음 markers in phoneme_focus.
+export function difficultyForCard(card: { korean: string; phoneme_focus?: string }):
+  | 'easy'
+  | 'medium'
+  | 'hard' {
+  const len = card.korean.replace(/[\s?!.,]/g, '').length;
+  const focus = card.phoneme_focus ?? '';
+  const hard = /쌍자음|연음|억양|약화|파열음/.test(focus);
+  if (len <= 3 && !hard) return 'easy';
+  if (len >= 9 || hard) return 'hard';
+  return 'medium';
+}
+
+export interface Deck {
+  id: string;
+  emoji: string;
+  titleKey: string; // i18n key for the localized title
+  defaultTitle: string; // Korean fallback / data-only label
+  count: number;
+  // Click filters cards by these substrings within the situations category.
+  keywords: string[];
+}
+
+export const decks: Deck[] = [
   {
-    id: 'daily-1',
-    korean: '어디서 내려요?',
-    romanize: 'eo-di-seo nae-ryeo-yo?',
-    translation: 'Где мне выходить?',
-    emoji: '🚏',
-    category: 'daily',
-    subcategory: '대중교통',
-    difficulty: 'easy',
-    phonemeHints: [
-      { char: '어', ipa: '/ʌ/' },
-      { char: '디', ipa: '/di/' },
-      { char: '서', ipa: '/sʌ/' },
-      { char: '내', ipa: '/nɛ/' },
-      { char: '려', ipa: '/ɾjʌ/' },
-      { char: '요', ipa: '/jo/' },
-    ],
-  },
-  {
-    id: 'daily-2',
-    korean: '얼마예요?',
-    romanize: 'eol-ma-ye-yo?',
-    translation: 'Сколько стоит?',
-    emoji: '💰',
-    category: 'daily',
-    difficulty: 'easy',
-    phonemeHints: [
-      { char: '얼', ipa: '/ʌl/' },
-      { char: '마', ipa: '/ma/' },
-      { char: '예', ipa: '/je/' },
-      { char: '요', ipa: '/jo/' },
-    ],
-  },
-  {
-    id: 'daily-3',
-    korean: '전화 받으세요',
-    romanize: 'jeon-hwa ba-deu-se-yo',
-    translation: 'Ответьте на звонок',
-    emoji: '📞',
-    category: 'daily',
-    difficulty: 'medium',
-  },
-  {
-    id: 'daily-4',
-    korean: '감사합니다',
-    romanize: 'gam-sa-ham-ni-da',
-    translation: 'Спасибо',
-    emoji: '🙏',
-    category: 'daily',
-    difficulty: 'easy',
-  },
-  {
-    id: 'idiom-1',
-    korean: '손발이 맞다',
-    romanize: 'son-ba-ri mat-da',
-    translation: 'Работать слаженно',
-    emoji: '👐',
-    category: 'idiom',
-    difficulty: 'hard',
-  },
-  {
-    id: 'idiom-2',
-    korean: '눈이 높다',
-    romanize: 'nu-ni nop-da',
-    translation: 'Быть разборчивым',
-    emoji: '👀',
-    category: 'idiom',
-    difficulty: 'medium',
-  },
-  {
-    id: 'situation-1',
-    korean: '접수하려고 하는데요',
-    romanize: 'jeop-su-ha-ryeo-go ha-neun-de-yo',
-    translation: 'Я хотел бы зарегистрироваться',
+    id: 'hospital',
     emoji: '🏥',
-    category: 'situation',
-    subcategory: '병원 접수',
-    difficulty: 'medium',
+    titleKey: 'deck.hospital',
+    defaultTitle: '병원',
+    count: 0,
+    // '약은'/'약을' instead of bare '약' so that 예약했어요 doesn't double-count
+    // into hospital alongside cafe (the bare '약' substring matches '예약').
+    keywords: ['병원', '약은', '약을', '아프'],
   },
   {
-    id: 'word-1',
-    korean: '버스',
-    romanize: 'beo-seu',
-    translation: 'Автобус',
+    id: 'shopping',
+    emoji: '🛍️',
+    titleKey: 'deck.shopping',
+    defaultTitle: '쇼핑',
+    count: 0,
+    keywords: ['계산', '봉투', '할인', '환불', '사이즈', '색깔'],
+  },
+  {
+    id: 'transport',
     emoji: '🚌',
-    category: 'word',
-    difficulty: 'easy',
+    titleKey: 'deck.transport',
+    defaultTitle: '교통',
+    count: 0,
+    keywords: ['버스', '지하철', '환승', '출구', '몇 분'],
   },
   {
-    id: 'word-2',
-    korean: '병원',
-    romanize: 'byeong-won',
-    translation: 'Больница',
-    emoji: '🏥',
-    category: 'word',
-    difficulty: 'easy',
+    id: 'cafe',
+    emoji: '☕',
+    titleKey: 'deck.cafe',
+    defaultTitle: '카페',
+    // 'predict' removed from cafe to avoid double-matching '예약했어요' with the
+    // hospital deck (which doesn't currently include it). Kept here because the
+    // cafe context owns the reservation use case in this dataset.
+    count: 0,
+    keywords: ['자리', '포장', '주문', '예약', '와이파이', '커피', '음료'],
   },
   {
-    id: 'word-3',
-    korean: '지하철',
-    romanize: 'ji-ha-cheol',
-    translation: 'Метро',
-    emoji: '🚇',
-    category: 'word',
-    difficulty: 'easy',
+    id: 'facility',
+    emoji: '🏪',
+    titleKey: 'deck.facility',
+    defaultTitle: '편의·숙소',
+    count: 0,
+    // Picks up "편의점 있어요?" and "짐 맡길 수 있어요?" — finding a place /
+    // using lodging-style facilities.
+    keywords: ['편의점', '짐', '호텔', '숙소', '맡길'],
+  },
+  {
+    id: 'permission',
+    emoji: '🙋',
+    titleKey: 'deck.permission',
+    defaultTitle: '양해 구하기',
+    count: 0,
+    // Picks up "이 버튼 눌러도 돼요?" and "여기 앉아도 돼요?" —
+    // asking-for-permission patterns ("...해도 돼요?" + button/seat objects).
+    keywords: ['눌러도', '앉아도', '들어가도', '써도', '먹어도'],
   },
 ];
+
+// 80-card mock dataset matching the real backend schema.
+export const mockBackendCards: ReadonlyArray<{
+  id: string;
+  type: string;
+  korean: string;
+  russian: string;
+  prompt_question: string;
+  phoneme_focus?: string;
+}> = [
+  { id: 'life_01', type: '생활문장', korean: '어디서 내려요?', russian: 'Где выходить?', prompt_question: '버스나 지하철에서 자주 쓰는 말이에요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침' },
+  { id: 'life_02', type: '생활문장', korean: '얼마예요?', russian: 'Сколько стоит?', prompt_question: '마트나 시장에서 꼭 필요한 표현이에요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침' },
+  { id: 'life_03', type: '생활문장', korean: '이거 주세요.', russian: 'Дайте мне это, пожалуйста.', prompt_question: '가게에서 물건을 살 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅈ 파열음' },
+  { id: 'life_04', type: '생활문장', korean: '버스 어디서 타요?', russian: 'Где сесть на автобус?', prompt_question: '길을 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅂ/ㅃ 쌍자음' },
+  { id: 'life_05', type: '생활문장', korean: '지하철 몇 호선이에요?', russian: 'Какая это линия метро?', prompt_question: '지하철을 탈 때 필요한 표현이에요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 연음' },
+  { id: 'life_06', type: '생활문장', korean: '화장실이 어디예요?', russian: 'Где туалет?', prompt_question: '꼭 알아야 하는 표현이에요. 따라 말해보세요!', phoneme_focus: 'ㅎ 약화' },
+  { id: 'life_07', type: '생활문장', korean: '영수증 주세요.', russian: 'Дайте мне чек, пожалуйста.', prompt_question: '계산 후 영수증을 받을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅈ 파열음' },
+  { id: 'life_08', type: '생활문장', korean: '천천히 말해 주세요.', russian: 'Говорите медленнее, пожалуйста.', prompt_question: '상대방이 너무 빠르게 말할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅊ 파열음' },
+  { id: 'life_09', type: '생활문장', korean: '다시 한번 말해 주세요.', russian: 'Повторите, пожалуйста, ещё раз.', prompt_question: '못 알아들었을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄷ/ㄸ 쌍자음' },
+  { id: 'life_10', type: '생활문장', korean: '감사합니다.', russian: 'Спасибо.', prompt_question: '가장 기본적인 감사 표현이에요. 따라 말해보세요!', phoneme_focus: 'ㅂ 받침' },
+  { id: 'life_11', type: '생활문장', korean: '죄송합니다.', russian: 'Извините / Простите.', prompt_question: '사과할 때 쓰는 표현이에요. 따라 말해보세요!', phoneme_focus: 'ㅂ 받침' },
+  { id: 'life_12', type: '생활문장', korean: '모르겠어요.', russian: 'Я не знаю.', prompt_question: '잘 모를 때 솔직하게 말해요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, ㅓ 모음' },
+  { id: 'life_13', type: '생활문장', korean: '잠깐만요.', russian: 'Подождите немного.', prompt_question: '잠시 기다려달라고 할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄱ/ㄲ 쌍자음' },
+  { id: 'life_14', type: '생활문장', korean: '전화번호가 뭐예요?', russian: 'Какой у вас номер телефона?', prompt_question: '연락처를 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅂ 받침, 의문문 억양' },
+  { id: 'life_15', type: '생활문장', korean: '배가 고파요.', russian: 'Я голоден / голодна.', prompt_question: '배가 고플 때 표현해요. 따라 말해보세요!', phoneme_focus: 'ㅂ/ㅃ 쌍자음' },
+  { id: 'life_16', type: '생활문장', korean: '물 한 잔 주세요.', russian: 'Дайте мне стакан воды, пожалуйста.', prompt_question: '식당에서 물을 요청할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅈ 파열음' },
+  { id: 'life_17', type: '생활문장', korean: '몇 시예요?', russian: 'Который час?', prompt_question: '시간을 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: '의문문 억양' },
+  { id: 'life_18', type: '생활문장', korean: '오늘 날씨가 좋네요.', russian: 'Сегодня хорошая погода.', prompt_question: '날씨 이야기를 시작할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 연음' },
+  { id: 'life_19', type: '생활문장', korean: '이름이 뭐예요?', russian: 'Как вас зовут?', prompt_question: '처음 만났을 때 이름을 물어봐요. 따라 말해보세요!', phoneme_focus: '의문문 억양' },
+  { id: 'life_20', type: '생활문장', korean: '어디에서 왔어요?', russian: 'Откуда вы?', prompt_question: '출신지를 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅓ/ㅗ 모음, 의문문 억양' },
+
+  { id: 'idiom_01', type: '관용구', korean: '손발이 맞아요.', russian: 'Мы хорошо сработались. (букв. руки и ноги совпадают)', prompt_question: '같이 일하는 사람과 잘 맞을 때 써요. 따라 말해보세요!', phoneme_focus: '연음 처리' },
+  { id: 'idiom_02', type: '관용구', korean: '발이 넓어요.', russian: 'У него/неё много знакомых. (букв. широкая нога)', prompt_question: '아는 사람이 많을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침' },
+  { id: 'idiom_03', type: '관용구', korean: '눈이 높아요.', russian: 'У него/неё высокие стандарты. (букв. высокие глаза)', prompt_question: '기준이 높은 사람을 말할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄴ 받침' },
+  { id: 'idiom_04', type: '관용구', korean: '배가 아파요.', russian: 'Я завидую. (букв. живот болит)', prompt_question: '남이 잘 될 때 샘이 날 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅂ/ㅃ 쌍자음' },
+  { id: 'idiom_05', type: '관용구', korean: '귀가 얇아요.', russian: 'Он/она легко поддаётся влиянию. (букв. тонкие уши)', prompt_question: '남의 말을 잘 믿는 사람을 표현해요. 따라 말해보세요!', phoneme_focus: 'ㄱ/ㄲ 쌍자음' },
+  { id: 'idiom_06', type: '관용구', korean: '입이 무거워요.', russian: 'Он/она умеет хранить секреты. (букв. тяжёлый рот)', prompt_question: '비밀을 잘 지키는 사람에게 써요. 따라 말해보세요!', phoneme_focus: 'ㅂ 받침' },
+  { id: 'idiom_07', type: '관용구', korean: '발 벗고 나서요.', russian: 'Он/она активно берётся за дело. (букв. выходит без обуви)', prompt_question: '적극적으로 돕는 사람을 표현해요. 따라 말해보세요!', phoneme_focus: 'ㄷ 받침' },
+  { id: 'idiom_08', type: '관용구', korean: '눈 깜짝할 사이예요.', russian: 'В мгновение ока. (букв. за один миг моргания)', prompt_question: '아주 짧은 시간을 표현할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄱ/ㄲ 쌍자음' },
+  { id: 'idiom_09', type: '관용구', korean: '머리를 맞대요.', russian: 'Мы вместе думаем над решением. (букв. прикладываем головы)', prompt_question: '함께 문제를 해결할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 연음' },
+  { id: 'idiom_10', type: '관용구', korean: '시간 가는 줄 몰랐어요.', russian: 'Я не заметил(а), как прошло время.', prompt_question: '너무 재미있어서 시간을 잊었을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 억양' },
+  { id: 'idiom_11', type: '관용구', korean: '마음이 맞아요.', russian: 'Мы понимаем друг друга. (букв. сердца совпадают)', prompt_question: '서로 잘 통하는 사람에게 써요. 따라 말해보세요!', phoneme_focus: '연음 처리' },
+  { id: 'idiom_12', type: '관용구', korean: '발목을 잡혀요.', russian: 'Меня что-то сдерживает. (букв. держат за лодыжку)', prompt_question: '무언가에 막혔을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침' },
+  { id: 'idiom_13', type: '관용구', korean: '눈코 뜰 새 없어요.', russian: 'Я очень занят(а). (букв. нет времени открыть глаза и нос)', prompt_question: '정말 바쁠 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 연음' },
+  { id: 'idiom_14', type: '관용구', korean: '입에 맞아요.', russian: 'Мне это нравится на вкус. (букв. подходит ко рту)', prompt_question: '음식이 맛있을 때 써요. 따라 말해보세요!', phoneme_focus: '연음 처리' },
+  { id: 'idiom_15', type: '관용구', korean: '손이 크네요.', russian: 'Вы очень щедрый/щедрая. (букв. большая рука)', prompt_question: '음식을 많이 만드는 사람에게 써요. 따라 말해보세요!', phoneme_focus: 'ㄴ 받침' },
+  { id: 'idiom_16', type: '관용구', korean: '발이 묶였어요.', russian: 'Я застрял(а). (букв. ноги связаны)', prompt_question: '어딘가에 갇혔을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침' },
+  { id: 'idiom_17', type: '관용구', korean: '눈이 맞았어요.', russian: 'Они влюбились друг в друга. (букв. глаза встретились)', prompt_question: '서로 좋아하게 됐을 때 써요. 따라 말해보세요!', phoneme_focus: '연음 처리' },
+  { id: 'idiom_18', type: '관용구', korean: '귀에 못이 박혔어요.', russian: 'Мне это надоело слышать. (букв. гвоздь вбит в ухо)', prompt_question: '같은 말을 너무 많이 들었을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄱ/ㄲ 쌍자음' },
+  { id: 'idiom_19', type: '관용구', korean: '밥 먹듯이 해요.', russian: 'Делает это постоянно. (букв. делает как ест рис)', prompt_question: '뭔가를 자주 할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅂ 받침' },
+  { id: 'idiom_20', type: '관용구', korean: '식은 죽 먹기예요.', russian: 'Это проще простого. (букв. есть холодную кашу)', prompt_question: '아주 쉬운 일을 표현해요. 따라 말해보세요!', phoneme_focus: 'ㄱ 받침, 연음' },
+
+  { id: 'situation_01', type: '상황형회화', korean: '병원 접수 어떻게 해요?', russian: 'Как записаться на приём в больницу?', prompt_question: '병원에 처음 갔을 때 써요. 따라 말해보세요!', phoneme_focus: '의문문 억양 상승' },
+  { id: 'situation_02', type: '상황형회화', korean: '이 약은 언제 먹어요?', russian: 'Когда принимать это лекарство?', prompt_question: '약국에서 약을 받을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅇ 받침, 연음' },
+  { id: 'situation_03', type: '상황형회화', korean: '계산은 카드로 할게요.', russian: 'Я буду платить картой.', prompt_question: '마트 계산대에서 써요. 따라 말해보세요!', phoneme_focus: 'ㄷ/ㄸ 쌍자음' },
+  { id: 'situation_04', type: '상황형회화', korean: '봉투 하나 주세요.', russian: 'Дайте мне один пакет, пожалуйста.', prompt_question: '마트에서 비닐봉투 받을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅂ/ㅃ 쌍자음' },
+  { id: 'situation_05', type: '상황형회화', korean: '환승이 어떻게 돼요?', russian: 'Как делается пересадка?', prompt_question: '대중교통 환승할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅎ 약화, 연음' },
+  { id: 'situation_06', type: '상황형회화', korean: '출구가 어디예요?', russian: 'Где выход?', prompt_question: '지하철역에서 출구를 찾을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄱ 받침' },
+  { id: 'situation_07', type: '상황형회화', korean: '자리 있어요?', russian: 'Есть свободное место?', prompt_question: '카페나 식당에서 자리를 찾을 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅈ 파열음' },
+  { id: 'situation_08', type: '상황형회화', korean: '포장해 주세요.', russian: 'Упакуйте, пожалуйста.', prompt_question: '음식을 테이크아웃할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅈ 파열음' },
+  { id: 'situation_09', type: '상황형회화', korean: '주문 받으세요?', russian: 'Вы принимаете заказ?', prompt_question: '식당에서 직원을 부를 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅈ 파열음, 의문문 억양' },
+  { id: 'situation_10', type: '상황형회화', korean: '이 근처에 편의점 있어요?', russian: 'Есть ли рядом магазин?', prompt_question: '길에서 편의점을 찾을 때 써요. 따라 말해보세요!', phoneme_focus: '연음 처리, 의문문 억양' },
+  { id: 'situation_11', type: '상황형회화', korean: '예약했어요.', russian: 'У меня есть бронирование.', prompt_question: '식당이나 병원에서 예약 확인할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅇ 받침' },
+  { id: 'situation_12', type: '상황형회화', korean: '할인 되나요?', russian: 'Есть ли скидка?', prompt_question: '쇼핑할 때 할인을 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: '의문문 억양' },
+  { id: 'situation_13', type: '상황형회화', korean: '환불 가능해요?', russian: 'Возможен ли возврат?', prompt_question: '물건을 반품할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 의문문 억양' },
+  { id: 'situation_14', type: '상황형회화', korean: '사이즈가 어떻게 돼요?', russian: 'Какой размер?', prompt_question: '옷을 살 때 사이즈를 물어봐요. 따라 말해보세요!', phoneme_focus: '의문문 억양' },
+  { id: 'situation_15', type: '상황형회화', korean: '다른 색깔 있어요?', russian: 'Есть другой цвет?', prompt_question: '다른 색상을 요청할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 의문문 억양' },
+  { id: 'situation_16', type: '상황형회화', korean: '짐 맡길 수 있어요?', russian: 'Можно оставить багаж?', prompt_question: '호텔이나 여행지에서 짐을 맡길 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄱ 받침' },
+  { id: 'situation_17', type: '상황형회화', korean: '와이파이 비밀번호가 뭐예요?', russian: 'Какой пароль от Wi-Fi?', prompt_question: '카페나 숙소에서 와이파이를 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: 'ㅂ 받침, 의문문 억양' },
+  { id: 'situation_18', type: '상황형회화', korean: '몇 분이나 걸려요?', russian: 'Сколько минут займёт?', prompt_question: '시간이 얼마나 걸리는지 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 의문문 억양' },
+  { id: 'situation_19', type: '상황형회화', korean: '이 버튼 눌러도 돼요?', russian: 'Можно нажать эту кнопку?', prompt_question: '버튼을 눌러도 되는지 확인할 때 써요. 따라 말해보세요!', phoneme_focus: 'ㄹ 받침, 의문문 억양' },
+  { id: 'situation_20', type: '상황형회화', korean: '여기 앉아도 돼요?', russian: 'Можно здесь сесть?', prompt_question: '자리에 앉아도 되는지 물어볼 때 써요. 따라 말해보세요!', phoneme_focus: '의문문 억양' },
+
+  { id: 'word_01', type: '기초단어', korean: '버스', russian: 'автобус', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅂ/ㅃ 쌍자음' },
+  { id: 'word_02', type: '기초단어', korean: '병원', russian: 'больница', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅂ/ㅃ 쌍자음' },
+  { id: 'word_03', type: '기초단어', korean: '지하철', russian: 'метро', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄹ 받침' },
+  { id: 'word_04', type: '기초단어', korean: '출구', russian: 'выход', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄱ 받침' },
+  { id: 'word_05', type: '기초단어', korean: '감사합니다', russian: 'спасибо', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅂ 받침' },
+  { id: 'word_06', type: '기초단어', korean: '괜찮아요', russian: 'всё хорошо / нормально', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅎ 약화, ㅓ/ㅗ 모음' },
+  { id: 'word_07', type: '기초단어', korean: '없어요', russian: 'нет / не имеется', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅂ 받침 연음' },
+  { id: 'word_08', type: '기초단어', korean: '주세요', russian: 'дайте, пожалуйста', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅈ 파열음' },
+  { id: 'word_09', type: '기초단어', korean: '편의점', russian: 'магазин (круглосуточный)', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: '연음 처리' },
+  { id: 'word_10', type: '기초단어', korean: '약국', russian: 'аптека', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄱ/ㄲ 쌍자음' },
+  { id: 'word_11', type: '기초단어', korean: '식당', russian: 'ресторан / столовая', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄱ 받침' },
+  { id: 'word_12', type: '기초단어', korean: '마트', russian: 'супермаркет', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄷ/ㄸ 쌍자음' },
+  { id: 'word_13', type: '기초단어', korean: '학교', russian: 'школа', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄱ/ㄲ 쌍자음' },
+  { id: 'word_14', type: '기초단어', korean: '은행', russian: 'банк', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅇ 받침' },
+  { id: 'word_15', type: '기초단어', korean: '우체국', russian: 'почта', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄱ 받침' },
+  { id: 'word_16', type: '기초단어', korean: '경찰서', russian: 'полицейский участок', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄹ 받침' },
+  { id: 'word_17', type: '기초단어', korean: '공항', russian: 'аэропорт', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅇ 받침' },
+  { id: 'word_18', type: '기초단어', korean: '비밀번호', russian: 'пароль', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅂ/ㅃ 쌍자음' },
+  { id: 'word_19', type: '기초단어', korean: '영수증', russian: 'чек / квитанция', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㅈ 파열음' },
+  { id: 'word_20', type: '기초단어', korean: '계단', russian: 'лестница', prompt_question: '이 단어를 큰 소리로 말해보세요!', phoneme_focus: 'ㄷ/ㄸ 쌍자음' },
+];
+
+// Compute deck counts at module load (situations matching keywords)
+for (const deck of decks) {
+  deck.count = mockBackendCards.filter(
+    (c) => c.type === '상황형회화' && deck.keywords.some((k) => c.korean.includes(k)),
+  ).length;
+}
+
+export interface DifficultyMeta {
+  label: string;
+  color: string;
+  bg: string;
+  dot: string;
+}
+
+export const difficultyMeta: Record<NonNullable<Card['difficulty']>, DifficultyMeta> = {
+  easy: { label: '쉬움', color: '#10B981', bg: '#ECFDF5', dot: '#10B981' },
+  medium: { label: '보통', color: '#F59E0B', bg: '#FFFBEB', dot: '#F59E0B' },
+  hard: { label: '어려움', color: '#EF4444', bg: '#FEF2F2', dot: '#EF4444' },
+};
+
+// Tip pool (Korean — UI translates via i18n key list, this is for analyzer/seed only)
+export const tipKeys: string[] = ['tip.bbpp', 'tip.eu', 'tip.questionRise', 'tip.aspirated'];
+
+export const mockResultForDemo: AnalysisResult = {
+  status: 'ready' as EvaluationStatus,
+  score: 84,
+  message: '잘했어요!',
+  issues: [],
+  phonemes: [
+    { ko: '어', user: '/ʌ/', target: '/ʌ/', correct: true },
+    { ko: '디', user: '/di/', target: '/di/', correct: true },
+    { ko: '서', user: '/sʌ/', target: '/sʌ/', correct: true },
+    { ko: '내', user: '/nɛ/', target: '/nɛ/', correct: true },
+    { ko: '려', user: '/ɾjʌ/', target: '/ɾjʌ/', correct: false, note: '받침 ㄹ을 더 분명하게 발음해 주세요' },
+    { ko: '요', user: '/jo/', target: '/jo/', correct: true },
+  ],
+  intonation: [
+    { c: '어', native: 62, mine: 60 },
+    { c: '디', native: 70, mine: 66 },
+    { c: '서', native: 68, mine: 64 },
+    { c: '내', native: 72, mine: 70 },
+    { c: '려', native: 78, mine: 68 },
+    { c: '요', native: 92, mine: 70 },
+  ],
+  intonationWarning: '문장 끝 억양이 부족해요',
+  aiFeedback: '전체적으로 발음이 깨끗했어요 — 받침 ㄹ을 더 또렷하게.',
+  prosodyExecuted: true,
+};

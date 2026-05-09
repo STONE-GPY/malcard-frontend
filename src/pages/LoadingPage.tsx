@@ -1,160 +1,245 @@
-import { useEffect } from 'react';
+import { useEffect, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useCardStore } from '../stores/useCardStore';
-import type { AnalysisStep } from '../types';
-
-const steps: { key: AnalysisStep; label: string; desc: string }[] = [
-  { key: 'upload', label: '음성 수신 완료', desc: '오디오 업로드됨' },
-  { key: 'phoneme', label: '발음 분석 중...', desc: '음소 단위로 비교 중' },
-  { key: 'intonation', label: '억양 분석', desc: '피치 곡선 추출' },
-  { key: 'feedback', label: '피드백 생성', desc: 'AI 교정 조언' },
-];
-
-const stepOrder: AnalysisStep[] = ['upload', 'phoneme', 'intonation', 'feedback'];
-
-function getStepState(current: AnalysisStep, step: AnalysisStep) {
-  const ci = stepOrder.indexOf(current);
-  const si = stepOrder.indexOf(step);
-  if (si < ci) return 'done';
-  if (si === ci) return 'active';
-  return 'waiting';
-}
+import { analyzer } from '../lib/analyzer';
+import { tokens } from '../theme/tokens';
+import { tipKeys } from '../data/cards';
+import { IconSparkle } from '../components/icons';
+import { ApiError } from '../api/client';
 
 export default function LoadingPage() {
   const navigate = useNavigate();
-  const { analysisStep, setAnalysisStep, setAnalysisResult } = useCardStore();
+  const { t } = useTranslation();
+  const {
+    setAnalysisResult,
+    setAnalysisError,
+    audioBlob,
+    currentCard,
+  } = useCardStore();
+
+  const [tipKey] = useState(() => tipKeys[Math.floor(Math.random() * tipKeys.length)]);
 
   useEffect(() => {
-    const timers = [
-      setTimeout(() => setAnalysisStep('phoneme'), 1500),
-      setTimeout(() => setAnalysisStep('intonation'), 4000),
-      setTimeout(() => setAnalysisStep('feedback'), 6500),
-      setTimeout(() => {
-        setAnalysisResult({
-          score: 84,
-          phonemes: [
-            { char: '어', ipa: '/ʌ/', correct: true },
-            { char: '디', ipa: '/di/', correct: true },
-            { char: '서', ipa: '/sʌ/', correct: true },
-            { char: '내', ipa: '/nɛ/', targetIpa: '/nɛ/', correct: false },
-            { char: '려', ipa: '/ɾjʌ/', correct: true },
-            { char: '요', ipa: '/jo/', correct: true },
-          ],
-          intonation: {
-            userF0: [180, 175, 170, 168, 165, 170],
-            referenceF0: [180, 175, 172, 168, 160, 140],
-            direction: 'rising',
-            feedback: '의문문이므로 문장 끝에서 억양을 더 올려주세요.',
-          },
-          llmFeedback: "전체적으로 잘했어요! 🎉 '내'의 모음 /ɛ/를 발음할 때 입을 옆으로 살짝 더 벌려보세요. 러시아어의 'э'와 비슷하지만 조금 더 열린 소리예요. 또한 의문문이니 끝을 올려주는 것도 잊지 마세요!",
-        });
-        navigate('/result');
-      }, 8500),
-    ];
-    return () => timers.forEach(clearTimeout);
-  }, [setAnalysisStep, setAnalysisResult, navigate]);
+    if (!currentCard || !audioBlob) {
+      navigate('/', { replace: true });
+      return;
+    }
+
+    const controller = new AbortController();
+    let cancelled = false;
+    setAnalysisError(null);
+
+    analyzer
+      .analyze(audioBlob, currentCard, { signal: controller.signal })
+      .then((result) => {
+        if (cancelled) return;
+        setAnalysisResult(result);
+        navigate('/result', { replace: true });
+      })
+      .catch((err) => {
+        if ((err as DOMException)?.name === 'AbortError') return;
+        if (cancelled) return;
+        if (err instanceof ApiError) {
+          setAnalysisError({ code: err.code, message: err.message });
+        } else {
+          setAnalysisError({
+            code: 'PIPELINE_ERROR',
+            message: (err as Error).message ?? '',
+          });
+        }
+        navigate('/result', { replace: true });
+      });
+
+    return () => {
+      cancelled = true;
+      controller.abort();
+    };
+  }, [audioBlob, currentCard, navigate, setAnalysisError, setAnalysisResult]);
 
   return (
-    <div style={{
-      display: 'flex', flexDirection: 'column', alignItems: 'center',
-      justifyContent: 'center', minHeight: '100dvh', padding: '40px 24px',
-    }}>
-      {/* Card visual with stack */}
-      <div style={{ width: 100, height: 130, margin: '0 auto 28px', position: 'relative' }}>
-        {/* Stack shadows */}
-        <div style={{
-          position: 'absolute', top: 3, left: 5, right: 5, bottom: -3,
-          background: '#EFEBE5', borderRadius: 16, zIndex: 0,
-        }} />
-        <div style={{
-          position: 'absolute', top: 6, left: 10, right: 10, bottom: -6,
-          background: 'var(--color-muted)', borderRadius: 16, zIndex: 0,
-        }} />
-        {/* Front card */}
-        <div style={{
-          width: '100%', height: '100%', background: 'var(--color-surface)', borderRadius: 16,
-          boxShadow: '0 4px 16px rgba(108,92,231,0.12)',
-          display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center',
-          position: 'relative', zIndex: 1, overflow: 'hidden',
-        }}>
-          <div style={{
-            position: 'absolute', top: 0, left: 0, right: 0, height: 4,
-            background: 'var(--color-primary-gradient)',
-          }} />
-          <div style={{ fontSize: 32, marginBottom: 6 }}>🎙️</div>
-          <div style={{ fontSize: 13, fontWeight: 800, color: '#2D2A26' }}>분석 중</div>
+    <div
+      data-testid="loading-page"
+      style={{
+        // Own the scroll inside #root. Loading is short, but consistent with
+        // the rest of the app — and safe if step descriptions ever grow.
+        height: '100%',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain',
+        background: tokens.bgGrad,
+        color: '#0F172A',
+        display: 'flex',
+        flexDirection: 'column',
+        padding: '34px 24px 30px',
+      }}
+    >
+      <div
+        style={{
+          flex: 1,
+          display: 'flex',
+          flexDirection: 'column',
+          alignItems: 'center',
+          justifyContent: 'center',
+          textAlign: 'center',
+        }}
+      >
+        <div
+          style={{
+            width: 140,
+            height: 140,
+            borderRadius: '50%',
+            background: tokens.primaryGrad,
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: '#fff',
+            boxShadow: `0 24px 48px -10px ${tokens.primaryShadow}`,
+            position: 'relative',
+            marginBottom: 28,
+            animation: 'mc-bounce 2s ease-in-out infinite',
+          }}
+        >
+          {[0, 0.8, 1.6].map((d) => (
+            <div
+              key={d}
+              style={{
+                position: 'absolute',
+                inset: 0,
+                borderRadius: '50%',
+                border: `2px solid rgba(99,102,241,0.4)`,
+                animation: `mc-ring 2.4s ease-out ${d}s infinite`,
+              }}
+            />
+          ))}
+          <IconSparkle size={56} stroke={2} />
+        </div>
+        <h2 style={{ fontSize: 24, fontWeight: 700, letterSpacing: -0.5, margin: 0 }}>
+          {t('loading.title')}
+        </h2>
+        <div style={{ fontSize: 15, color: '#64748B', marginTop: 8, fontWeight: 500 }}>
+          {t('loading.subtitle')}
         </div>
       </div>
 
-      <div style={{ fontSize: 20, fontWeight: 800, color: '#2D2A26', marginBottom: 6, textAlign: 'center' }}>
-        카드를 뒤집고 있어요
-      </div>
-      <div style={{ fontSize: 13, color: 'var(--color-text-secondary)', marginBottom: 36 }}>
-        발음을 분석하고 피드백을 준비해요
+      {/*
+        Indeterminate progress bar — honest abstraction. The backend is
+        monolithic (no per-step events) so showing a 4-step checklist
+        misled users into thinking the pipeline had reached "feedback
+        generation" even on retry/discarded paths that abort early at the
+        audio gate. A continuous shimmer just says "we're working" without
+        claiming to know which stage.
+      */}
+      <div
+        style={{
+          background: '#FFFFFF',
+          borderRadius: tokens.radiusLg,
+          padding: 16,
+          border: '1px solid rgba(15,23,42,0.05)',
+          boxShadow: '0 4px 16px -8px rgba(15,23,42,0.08)',
+          marginBottom: 14,
+        }}
+      >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 10,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#0F172A',
+              letterSpacing: -0.1,
+            }}
+          >
+            {t('loading.progressLabel')}
+          </span>
+          <div style={{ display: 'flex', gap: 4 }} aria-hidden="true">
+            {[0, 1, 2].map((d) => (
+              <div
+                key={d}
+                style={{
+                  width: 5,
+                  height: 5,
+                  borderRadius: '50%',
+                  background: tokens.primary,
+                  animation: `mc-dots 1.2s ease-in-out ${d * 0.16}s infinite`,
+                }}
+              />
+            ))}
+          </div>
+        </div>
+        <div
+          role="progressbar"
+          aria-label={t('loading.title')}
+          style={{
+            height: 8,
+            borderRadius: 999,
+            background: tokens.primarySoft,
+            overflow: 'hidden',
+            position: 'relative',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: 999,
+              background: `linear-gradient(90deg, transparent 0%, ${tokens.primary} 50%, transparent 100%)`,
+              animation: 'mc-progress-sweep 1.6s ease-in-out infinite',
+            }}
+          />
+        </div>
       </div>
 
-      {/* Steps */}
-      <div style={{ display: 'flex', flexDirection: 'column', gap: 10, width: '100%', maxWidth: 300 }}>
-        {steps.map((step) => {
-          const state = getStepState(analysisStep, step.key);
-          return (
-            <div key={step.key} style={{
-              display: 'flex', alignItems: 'center', gap: 12,
-              padding: '12px 14px', borderRadius: 14,
-              background: state === 'done' ? '#FAFFF9' : 'var(--color-surface)',
-              border: `1.5px solid ${state === 'active' ? 'var(--color-primary)' : state === 'done' ? 'var(--color-success)' : 'var(--color-border)'}`,
-            }}>
-              <div style={{
-                width: 32, height: 32, borderRadius: 'var(--radius-sm)',
-                display: 'flex', alignItems: 'center', justifyContent: 'center', flexShrink: 0,
-                background: state === 'active' ? 'var(--color-primary-light)' : state === 'done' ? 'var(--color-success-light)' : 'var(--color-bg)',
-              }}>
-                {state === 'done' ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#43A047" strokeWidth="2.5"><polyline points="20 6 9 17 4 12" /></svg>
-                ) : state === 'active' ? (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="var(--color-primary)" strokeWidth="2">
-                    <path d="M12 1a3 3 0 0 0-3 3v8a3 3 0 0 0 6 0V4a3 3 0 0 0-3-3z" />
-                    <path d="M19 10v2a7 7 0 0 1-14 0v-2" />
-                  </svg>
-                ) : (
-                  <svg width="16" height="16" viewBox="0 0 24 24" fill="none" stroke="#DDD8D0" strokeWidth="2">
-                    <circle cx="12" cy="12" r="4" />
-                  </svg>
-                )}
-              </div>
-              <div style={{ flex: 1 }}>
-                <div style={{ fontSize: 13, fontWeight: 600, color: state === 'waiting' ? '#C4BEB6' : '#2D2A26' }}>
-                  {step.label}
-                </div>
-                <div style={{ fontSize: 11, color: state === 'waiting' ? '#DDD8D0' : 'var(--color-text-tertiary)', marginTop: 1 }}>
-                  {step.desc}
-                </div>
-              </div>
-              {state === 'active' && (
-                <div style={{ display: 'flex', gap: 3 }}>
-                  {[0, 1, 2].map((i) => (
-                    <div key={i} style={{
-                      width: 4, height: 4, borderRadius: '50%', background: 'var(--color-primary)',
-                      animation: `bounce 1.4s infinite ease-in-out ${i * 0.2}s`,
-                    }} />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
-      </div>
-
-      {/* Tip */}
-      <div style={{
-        marginTop: 32, padding: '14px 16px',
-        background: 'var(--color-surface)', borderRadius: 14, border: '1px solid var(--color-border)',
-        display: 'flex', alignItems: 'flex-start', gap: 8, maxWidth: 300, width: '100%',
-      }}>
-        <span style={{ fontSize: 16, flexShrink: 0 }}>💡</span>
-        <span style={{ fontSize: 12, color: '#6B6560', lineHeight: 1.5 }}>
-          러시아어 화자는 <strong style={{ color: 'var(--color-primary)' }}>'ㅂ'과 'ㅃ'</strong> 구분이 어려울 수 있어요. 입술을 꽉 다물었다 터뜨려 보세요!
-        </span>
+      <div
+        style={{
+          background: `linear-gradient(135deg, ${tokens.streakA} 0%, ${tokens.streakB} 100%)`,
+          borderRadius: tokens.radiusMd,
+          padding: '14px 16px',
+          display: 'flex',
+          gap: 12,
+          border: '1px solid rgba(245,158,11,0.18)',
+        }}
+      >
+        <div
+          style={{
+            width: 32,
+            height: 32,
+            borderRadius: 10,
+            background: '#fff',
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'center',
+            color: tokens.streakText,
+            flexShrink: 0,
+          }}
+        >
+          <IconSparkle size={18} stroke={2.2} />
+        </div>
+        <div>
+          <div
+            style={{
+              fontSize: 11,
+              fontWeight: 700,
+              color: tokens.streakText,
+              letterSpacing: 1,
+              textTransform: 'uppercase',
+              marginBottom: 3,
+            }}
+          >
+            {t('loading.tipLabel')}
+          </div>
+          <div
+            style={{ fontSize: 13, color: tokens.streakText, lineHeight: 1.45, fontWeight: 500 }}
+          >
+            {t(tipKey)}
+          </div>
+        </div>
       </div>
     </div>
   );
