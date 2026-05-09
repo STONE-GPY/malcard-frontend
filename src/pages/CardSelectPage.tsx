@@ -1,4 +1,4 @@
-import { useEffect, useMemo } from 'react';
+import { useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useCardStore } from '../stores/useCardStore';
@@ -18,12 +18,36 @@ export default function CardSelectPage() {
   const { selectedCategory, setCategory, setCurrentCard, setCardList } = useCardStore();
   const { cards, loading, error, reload } = useCards(selectedCategory);
   const history = useHistoryStore((s) => s.history);
+  // Selected deck filters the visible card list to the keywords of that deck.
+  // Null = no deck filter, show all cards in the current category.
+  const [selectedDeckId, setSelectedDeckId] = useState<string | null>(null);
+
+  // Reset deck filter whenever the category tab changes (e.g. user moves away
+  // from 상황 to 일상 — a deck filter from 상황 wouldn't make sense).
+  useEffect(() => {
+    setSelectedDeckId(null);
+  }, [selectedCategory]);
+
+  // Decks are only meaningful inside the situations category.
+  const showDecks = selectedCategory === 'situations';
+
+  // Apply deck keyword filter on top of the category filter when a deck is
+  // selected. The full-resolution card list (decks visible) ignores the deck
+  // filter; the filtered list is what the rendered card rows iterate.
+  const activeDeck = selectedDeckId
+    ? decks.find((d) => d.id === selectedDeckId) ?? null
+    : null;
+  const visibleCards = useMemo(() => {
+    if (!activeDeck) return cards;
+    return cards.filter((c) =>
+      activeDeck.keywords.some((kw) => c.korean.includes(kw)),
+    );
+  }, [cards, activeDeck]);
 
   useEffect(() => {
-    setCardList(cards);
-  }, [cards, setCardList]);
+    setCardList(visibleCards);
+  }, [visibleCards, setCardList]);
 
-  const showDecks = selectedCategory === 'all' || selectedCategory === 'situations';
   const streak = useMemo(() => streakDays(history), [history]);
 
   const handleCardClick = (card: Card) => {
@@ -31,27 +55,34 @@ export default function CardSelectPage() {
     navigate('/learn');
   };
 
-  const handleDeckClick = (keywords: string[]) => {
-    setCategory('situations');
-    const target = cards.find(
-      (c) => c.type === '상황형회화' && keywords.some((k) => c.korean.includes(k)),
-    );
-    if (target) {
-      setCurrentCard(target);
-      navigate('/learn');
-    }
+  // Deck click now FILTERS the card list instead of auto-navigating into a
+  // single matching card. Click again on the active deck to clear the filter.
+  const handleDeckClick = (deckId: string) => {
+    setSelectedDeckId((current) => (current === deckId ? null : deckId));
   };
 
   return (
     <div
       style={{
-        minHeight: '100%',
+        // Outer is flex column; inner wrapper owns the scroll.
+        // (overflow:auto + flex column on the same element shrinks children
+        // instead of scrolling — see ProfilePage for the trap that hit.)
+        height: '100%',
         background: tokens.pageBg,
         color: '#0F172A',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
       <div style={{ padding: `28px ${tokens.pad}px 18px` }}>
         <div
           style={{
@@ -140,94 +171,69 @@ export default function CardSelectPage() {
       </div>
 
       {showDecks && (
-        <>
-          <SectionLabel>{t('deck.sectionLabel')}</SectionLabel>
-          <div
-            style={{
-              display: 'grid',
-              gridTemplateColumns: '1fr 1fr',
-              gap: 12,
-              padding: `0 ${tokens.pad}px 6px`,
-            }}
-          >
-            {decks.map((deck, i) => (
+        <div
+          style={{
+            // Wrapped chip group: every filter is visible at once with no
+            // hidden-on-scroll items and no need for drag-to-scroll. Filters
+            // are a small fixed set (6 decks) so multi-row chips read better
+            // than a horizontal scroller.
+            display: 'flex',
+            flexWrap: 'wrap',
+            gap: 8,
+            padding: `2px ${tokens.pad}px 14px`,
+          }}
+        >
+          {decks.map((deck, i) => {
+            const isActive = selectedDeckId === deck.id;
+            const accent = tokens.deckAccents[i] ?? tokens.primary;
+            return (
               <button
                 key={deck.id}
-                onClick={() => handleDeckClick(deck.keywords)}
+                onClick={() => handleDeckClick(deck.id)}
+                aria-pressed={isActive}
                 style={{
-                  width: '100%',
-                  height: 148,
-                  borderRadius: tokens.radiusLg,
-                  background: tokens.deckGrads[i] ?? tokens.deckGrads[0],
-                  padding: tokens.cardPad + 4,
-                  position: 'relative',
-                  textAlign: 'left',
-                  color: '#fff',
-                  boxShadow: `0 14px 28px -10px ${tokens.deckAccents[i]}66, 0 4px 8px -4px ${tokens.deckAccents[i]}40`,
-                  overflow: 'hidden',
-                  display: 'flex',
-                  flexDirection: 'column',
-                  justifyContent: 'space-between',
+                  flexShrink: 0,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 6,
+                  padding: '8px 14px',
+                  borderRadius: 999,
+                  border: isActive ? 'none' : `1px solid ${accent}33`,
+                  background: isActive ? accent : '#FFFFFF',
+                  color: isActive ? '#FFFFFF' : accent,
+                  fontWeight: isActive ? 700 : 600,
+                  fontSize: 13,
+                  letterSpacing: -0.1,
+                  whiteSpace: 'nowrap',
+                  cursor: 'pointer',
+                  boxShadow: isActive
+                    ? `0 4px 12px -4px ${accent}66`
+                    : '0 1px 2px rgba(15,23,42,0.04)',
+                  transition: 'background 0.15s ease, color 0.15s ease, box-shadow 0.15s ease',
                 }}
               >
-                <div
+                <span style={{ fontSize: 14, lineHeight: 1 }}>{deck.emoji}</span>
+                <span>{t(deck.titleKey)}</span>
+                <span
                   style={{
-                    position: 'absolute',
-                    top: -40,
-                    right: -40,
-                    width: 140,
-                    height: 140,
-                    borderRadius: '50%',
-                    background: 'rgba(255,255,255,0.18)',
-                    filter: 'blur(8px)',
-                  }}
-                />
-                <div
-                  style={{
-                    fontSize: 44,
-                    lineHeight: 1,
-                    filter: 'drop-shadow(0 4px 8px rgba(0,0,0,0.15))',
+                    fontSize: 11,
+                    opacity: 0.75,
+                    fontVariantNumeric: 'tabular-nums',
+                    fontWeight: 600,
                   }}
                 >
-                  {deck.emoji}
-                </div>
-                <div style={{ position: 'relative' }}>
-                  <div style={{ fontSize: 12, opacity: 0.85, fontWeight: 500, marginBottom: 2 }}>
-                    {deck.defaultTitle}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 19,
-                      fontWeight: 700,
-                      letterSpacing: -0.3,
-                      lineHeight: 1.15,
-                    }}
-                  >
-                    {t(deck.titleKey)}
-                  </div>
-                  <div
-                    style={{
-                      fontSize: 12,
-                      marginTop: 8,
-                      fontWeight: 500,
-                      padding: '4px 9px',
-                      borderRadius: 999,
-                      background: 'rgba(255,255,255,0.22)',
-                      backdropFilter: 'blur(6px)',
-                      display: 'inline-block',
-                    }}
-                  >
-                    {t('deck.countSuffix', { count: deck.count })}
-                  </div>
-                </div>
+                  {deck.count}
+                </span>
               </button>
-            ))}
-          </div>
-        </>
+            );
+          })}
+        </div>
       )}
 
       <SectionLabel>
-        {showDecks ? t('cards.sectionAll') : t('cards.sectionList')} · {cards.length}
+        {activeDeck
+          ? `${t(activeDeck.titleKey)} · ${visibleCards.length}`
+          : `${t('cards.sectionList')} · ${visibleCards.length}`}
       </SectionLabel>
 
       <div
@@ -270,7 +276,7 @@ export default function CardSelectPage() {
             </button>
           </div>
         )}
-        {!loading && !error && cards.length === 0 && (
+        {!loading && !error && visibleCards.length === 0 && (
           <div
             data-testid="empty-cards"
             style={{
@@ -286,7 +292,7 @@ export default function CardSelectPage() {
             {t('cards.empty')}
           </div>
         )}
-        {!loading && !error && cards.map((card) => (
+        {!loading && !error && visibleCards.map((card) => (
           <button
             key={card.id}
             onClick={() => handleCardClick(card)}
@@ -370,6 +376,7 @@ export default function CardSelectPage() {
             <IconChevronRight size={18} style={{ color: '#CBD5E1', flexShrink: 0 }} />
           </button>
         ))}
+      </div>
       </div>
 
       <BottomNav />

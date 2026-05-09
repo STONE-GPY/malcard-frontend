@@ -21,8 +21,10 @@ export const tokens = {
     'linear-gradient(135deg, #FB923C 0%, #F97316 55%, #EA580C 100%)',
     'linear-gradient(135deg, #14B8A6 0%, #0D9488 55%, #0F766E 100%)',
     'linear-gradient(135deg, #EC4899 0%, #DB2777 55%, #BE185D 100%)',
+    'linear-gradient(135deg, #38BDF8 0%, #0EA5E9 55%, #0284C7 100%)',
+    'linear-gradient(135deg, #F59E0B 0%, #D97706 55%, #B45309 100%)',
   ],
-  deckAccents: ['#6366F1', '#F97316', '#14B8A6', '#EC4899'],
+  deckAccents: ['#6366F1', '#F97316', '#14B8A6', '#EC4899', '#0EA5E9', '#D97706'],
 
   pad: 14,
   gap: 8,

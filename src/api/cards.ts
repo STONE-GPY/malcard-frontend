@@ -1,4 +1,4 @@
-import { apiFetch, USE_MOCK_API } from './client';
+import { apiFetch, useMockApi } from './client';
 import { mockBackendCards } from '../data/cards';
 import type { BackendCard, Card } from '../types';
 import { decorateCard } from './mappers';
@@ -18,7 +18,7 @@ interface ListCardsParams {
 }
 
 export async function listCards(params: ListCardsParams = {}): Promise<CardsListResponse> {
-  if (USE_MOCK_API) {
+  if (useMockApi()) {
     return mockListCards(params);
   }
   const qs = new URLSearchParams();
@@ -29,7 +29,7 @@ export async function listCards(params: ListCardsParams = {}): Promise<CardsList
 }
 
 export async function getCard(id: string, signal?: AbortSignal): Promise<BackendCard> {
-  if (USE_MOCK_API) {
+  if (useMockApi()) {
     const found = mockBackendCards.find((c) => c.id === id);
     if (!found) throw new Error('CARD_NOT_FOUND');
     return found as BackendCard;

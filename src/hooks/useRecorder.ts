@@ -1,4 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
+import { blobToWav } from '../lib/wav';
 
 export type RecorderStatus =
   | 'idle'
@@ -108,9 +109,19 @@ export function useRecorder(opts: UseRecorderOptions = {}): UseRecorderReturn {
       recorder.ondataavailable = (e) => {
         if (e.data.size > 0) chunksRef.current.push(e.data);
       };
-      recorder.onstop = () => {
-        const blob = new Blob(chunksRef.current, { type: 'audio/webm' });
-        setAudioBlob(blob);
+      recorder.onstop = async () => {
+        const recordedMime = recorder.mimeType || 'audio/webm';
+        const recorded = new Blob(chunksRef.current, { type: recordedMime });
+        try {
+          // Backend prosody pipeline (parselmouth) only reads WAV/AIFF/FLAC.
+          // Decode the browser-encoded blob and re-encode as 16 kHz mono PCM WAV
+          // so both phoneme (librosa) and prosody stages can read it directly.
+          const wav = await blobToWav(recorded, 16000);
+          setAudioBlob(wav);
+        } catch (err) {
+          console.error('[useRecorder] WAV encode failed, falling back to raw blob', err);
+          setAudioBlob(recorded);
+        }
         setStatus('preview');
         cleanup();
       };

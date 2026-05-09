@@ -6,9 +6,10 @@ import type {
   Card,
   EvaluationStatus,
 } from '../types';
-import { USE_MOCK_API } from '../api/client';
+import { useMockApi } from '../api/client';
 import { postFullAnalysis } from '../api/analysis';
 import { mapAnalysisResponse } from '../api/mappers';
+import { buildScenarioResponse, getActiveScenario } from './mockScenarios';
 
 export interface AnalyzeOptions {
   onStep?: (step: AnalysisStep) => void;
@@ -100,54 +101,44 @@ function buildMockBackendResponse(card: Card): BackendFullResponse {
   };
 }
 
+// onStep callbacks were removed: the previous code synthesized fake "upload →
+// phoneme → intonation → feedback" progress signals on a fixed timer, which
+// misled users into thinking the pipeline reached "feedback generation" even
+// when the backend aborted at the audio gate. The LoadingPage now shows an
+// indeterminate progress bar. The Analyzer.onStep callback is kept in the
+// interface so a future SSE/WebSocket-capable backend can reintroduce real
+// per-stage signals without changing call sites.
+
 export const mockAnalyzer: Analyzer = {
-  async analyze(_audio, card, { onStep, signal } = {}) {
-    onStep?.('upload');
-    await wait(900, signal);
-    onStep?.('phoneme');
-    await wait(1100, signal);
-    onStep?.('intonation');
-    await wait(900, signal);
-    onStep?.('feedback');
-    const backend = buildMockBackendResponse(card);
+  async analyze(_audio, card, { signal } = {}) {
+    const scenario = getActiveScenario();
+    // Single artificial delay simulates "the work is happening" without
+    // pretending to know how far along it is.
+    await wait(2300, signal);
+    const backend = await buildScenarioResponse(scenario, {
+      card,
+      defaultBuilder: buildMockBackendResponse,
+    });
     return mapAnalysisResponse(backend, card.korean);
   },
 };
 
 export const httpAnalyzer: Analyzer = {
-  async analyze(audio, card, { onStep, signal } = {}) {
-    onStep?.('upload');
-    // Backend is monolithic for /analysis/full — we can't observe phoneme→prosody steps.
-    // Tick step labels at fixed intervals while waiting so the UI animates.
-    const ticker = setInterval(() => {
-      // No-op; setp progression is driven by Promise.race below
-    }, 1000);
-    try {
-      // Drive step progression while the request is in-flight
-      let stepIdx = 0;
-      const stepTimer = setInterval(() => {
-        stepIdx += 1;
-        if (stepIdx === 1) onStep?.('phoneme');
-        else if (stepIdx === 2) onStep?.('intonation');
-        else if (stepIdx === 3) onStep?.('feedback');
-      }, 700);
-
-      try {
-        const res = await postFullAnalysis({
-          audio,
-          referenceText: card.korean,
-          profile: 'ru',
-          signal,
-        });
-        onStep?.('feedback');
-        return mapAnalysisResponse(res, card.korean);
-      } finally {
-        clearInterval(stepTimer);
-      }
-    } finally {
-      clearInterval(ticker);
-    }
+  async analyze(audio, card, { signal } = {}) {
+    const res = await postFullAnalysis({
+      audio,
+      referenceText: card.korean,
+      profile: 'ru',
+      signal,
+    });
+    return mapAnalysisResponse(res, card.korean);
   },
 };
 
-export const analyzer: Analyzer = USE_MOCK_API ? mockAnalyzer : httpAnalyzer;
+// Resolve at call time so the in-app dev panel toggle takes effect immediately
+// (USE_MOCK_API is the .env default; useMockApi() honours the runtime override).
+export const analyzer: Analyzer = {
+  analyze(audio, card, options) {
+    return (useMockApi() ? mockAnalyzer : httpAnalyzer).analyze(audio, card, options);
+  },
+};

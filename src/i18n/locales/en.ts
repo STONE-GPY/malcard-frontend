@@ -24,6 +24,8 @@ export const en: KoTranslations = {
     shopping: 'Shopping',
     transport: 'Transport',
     cafe: 'Cafe',
+    facility: 'Stores & Stays',
+    permission: 'Asking permission',
     countSuffix: '{{count}} cards',
   },
   cards: {
@@ -44,6 +46,7 @@ export const en: KoTranslations = {
     typeLabel: 'Category',
     progress: '{{idx}} / {{total}}',
     exampleAudio: 'Listen',
+    exampleAudioStop: 'Stop',
     phonemeHints: 'Pronunciation hints',
     micPrompt: 'Tap to speak',
     micRecording: 'Recording… tap to stop',
@@ -58,12 +61,7 @@ export const en: KoTranslations = {
   loading: {
     title: 'Analyzing your voice',
     subtitle: 'Just a moment…',
-    steps: {
-      upload: 'Audio uploaded',
-      phoneme: 'Analyzing phonemes',
-      intonation: 'Extracting intonation',
-      feedback: 'Generating feedback',
-    },
+    progressLabel: 'Working',
     tipLabel: 'Tip',
   },
   tip: {
@@ -78,6 +76,7 @@ export const en: KoTranslations = {
     totalScore: 'Total',
     accuracy: '{{correct}}/{{total}} correct',
     phonemeSection: 'Phoneme analysis',
+    issuesTitle: 'Correction points',
     intonation: 'Intonation',
     aiCoaching: 'MalCard AI',
     native: 'Native',
@@ -105,7 +104,6 @@ export const en: KoTranslations = {
     tryAgain: 'Try again!',
   },
   intonation: {
-    empty: 'No intonation data',
     endRiseLow: 'Sentence-final pitch is too low',
     endRiseHigh: 'Sentence-final pitch is too high',
     choppy: 'Try smoothing your intonation',

@@ -22,6 +22,8 @@ export const ko = {
     shopping: '쇼핑',
     transport: '교통',
     cafe: '카페',
+    facility: '편의·숙소',
+    permission: '양해 구하기',
     countSuffix: '카드 {{count}}장',
   },
   cards: {
@@ -42,6 +44,7 @@ export const ko = {
     typeLabel: '카테고리',
     progress: '{{idx}} / {{total}}',
     exampleAudio: '예문 듣기',
+    exampleAudioStop: '정지',
     phonemeHints: '발음 힌트',
     micPrompt: '눌러서 말하기',
     micRecording: '녹음 중… 다시 눌러 정지',
@@ -56,12 +59,7 @@ export const ko = {
   loading: {
     title: '음성을 분석하고 있어요',
     subtitle: '잠시만 기다려 주세요…',
-    steps: {
-      upload: '음성 업로드 완료',
-      phoneme: '음소 분석 중',
-      intonation: '억양 추출 중',
-      feedback: '피드백 생성 중',
-    },
+    progressLabel: '처리 중',
     tipLabel: '학습 팁',
   },
   tip: {
@@ -76,6 +74,7 @@ export const ko = {
     totalScore: '총점',
     accuracy: '{{correct}}/{{total}} 정확',
     phonemeSection: '음소 분석',
+    issuesTitle: '발음 교정 포인트',
     intonation: '억양',
     aiCoaching: 'MalCard AI',
     native: '원어민',
@@ -103,7 +102,6 @@ export const ko = {
     tryAgain: '다시 도전!',
   },
   intonation: {
-    empty: '억양 데이터가 없어요',
     endRiseLow: '문장 끝 억양이 부족해요',
     endRiseHigh: '문장 끝 억양이 과해요',
     choppy: '억양 흐름을 더 다듬어 보세요',

@@ -1,4 +1,4 @@
-import { useCallback, useEffect, useMemo } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useCardStore } from '../stores/useCardStore';
@@ -28,6 +28,7 @@ export default function CardLearnPage() {
   const { t, i18n } = useTranslation();
   const { currentCard, setAudioBlob, currentPosition } = useCardStore();
   const recorder = useRecorder({ maxDurationMs: MAX_DURATION_MS, minDurationMs: MIN_DURATION_MS });
+  const [isSpeaking, setIsSpeaking] = useState(false);
 
   useEffect(() => {
     if (!currentCard) navigate('/', { replace: true });
@@ -41,11 +42,34 @@ export default function CardLearnPage() {
     }
   }, [recorder.status, recorder.audioBlob, setAudioBlob, navigate]);
 
+  // Cancel any in-flight TTS when the card changes or the page unmounts.
+  // Without this, navigating away mid-playback leaves the synth speaking.
+  useEffect(() => {
+    return () => {
+      if (typeof speechSynthesis !== 'undefined') {
+        speechSynthesis.cancel();
+      }
+      setIsSpeaking(false);
+    };
+  }, [currentCard?.id]);
+
   const handleTTS = useCallback(() => {
     if (!currentCard) return;
+    if (typeof speechSynthesis === 'undefined') return;
+
+    // If something is already speaking, treat the click as a stop.
+    if (speechSynthesis.speaking || speechSynthesis.pending) {
+      speechSynthesis.cancel();
+      setIsSpeaking(false);
+      return;
+    }
+
     const utterance = new SpeechSynthesisUtterance(currentCard.korean);
     utterance.lang = 'ko-KR';
     utterance.rate = 0.8;
+    utterance.onend = () => setIsSpeaking(false);
+    utterance.onerror = () => setIsSpeaking(false);
+    setIsSpeaking(true);
     speechSynthesis.speak(utterance);
   }, [currentCard]);
 
@@ -72,7 +96,11 @@ export default function CardLearnPage() {
     <div
       data-testid="learn-page"
       style={{
-        minHeight: '100%',
+        // Outer is flex column; inner wrapper owns the scroll. Mic action area
+        // sits OUTSIDE the wrapper so it is always at the bottom of the page,
+        // no sticky/marginTop:auto tricks needed. Putting overflow on the same
+        // element as flex column shrinks children — see ProfilePage fix.
+        height: '100%',
         background: tokens.bgGrad,
         color: '#0F172A',
         position: 'relative',
@@ -80,6 +108,15 @@ export default function CardLearnPage() {
         flexDirection: 'column',
       }}
     >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
       <div
         style={{
           padding: `26px ${tokens.pad}px 14px`,
@@ -207,6 +244,10 @@ export default function CardLearnPage() {
         )}
         <button
           onClick={handleTTS}
+          aria-pressed={isSpeaking}
+          aria-label={
+            isSpeaking ? t('learn.exampleAudioStop') : t('learn.exampleAudio')
+          }
           style={{
             marginTop: 22,
             display: 'inline-flex',
@@ -214,14 +255,25 @@ export default function CardLearnPage() {
             gap: 8,
             padding: '12px 22px',
             borderRadius: 999,
-            background: '#0F172A',
+            background: isSpeaking ? '#EF4444' : '#0F172A',
             color: '#fff',
             fontSize: 14,
             fontWeight: 600,
-            boxShadow: '0 4px 14px -2px rgba(15,23,42,0.25)',
+            boxShadow: isSpeaking
+              ? '0 4px 14px -2px rgba(239,68,68,0.45)'
+              : '0 4px 14px -2px rgba(15,23,42,0.25)',
+            transition: 'background 0.18s ease, box-shadow 0.18s ease',
           }}
         >
-          <IconVolume size={18} stroke={2.2} /> {t('learn.exampleAudio')}
+          {isSpeaking ? (
+            <>
+              <IconStop size={18} /> {t('learn.exampleAudioStop')}
+            </>
+          ) : (
+            <>
+              <IconVolume size={18} stroke={2.2} /> {t('learn.exampleAudio')}
+            </>
+          )}
         </button>
       </div>
 
@@ -275,14 +327,10 @@ export default function CardLearnPage() {
           </div>
         </div>
       )}
+      </div>
 
       <div
         style={{
-          position: 'sticky',
-          bottom: 0,
-          left: 0,
-          right: 0,
-          marginTop: 'auto',
           padding: '20px 24px 36px',
           background:
             'linear-gradient(180deg, rgba(250,250,252,0) 0%, rgba(250,250,252,0.96) 30%)',

@@ -42,6 +42,48 @@ export interface BackendIssue {
   ko?: string;
   hint?: string;
   note?: string;
+  // Real backend (pronunciation_backend_pipeline) shape — IPA-token level.
+  // The backend already produces user-facing Korean strings in `description`
+  // and `tip`; the legacy expected/actual/note keys above are mock-only.
+  issue_type?: string;
+  severity?: 'low' | 'medium' | 'high' | string;
+  description?: string;
+  tip?: string;
+  ref_token?: string | null;
+  hyp_token?: string | null;
+  cost?: number;
+  acceptable?: boolean;
+}
+
+// UI-shaped issue card (after mapping). Surfaces an IPA-level mismatch with
+// the backend-authored Korean description and tip.
+export interface IssueCardUi {
+  refToken: string;       // expected IPA (or '∅' for insertions)
+  hypToken: string;       // observed IPA
+  severity: 'low' | 'medium' | 'high';
+  description: string;
+  tip: string;
+  /** Hangul syllables whose IPA contains the offending token — best-effort
+   *  hint about WHERE in the utterance to apply the correction. May be empty
+   *  when the IPA can't be resolved to any syllable. */
+  relatedSyllables: string[];
+}
+
+export interface BackendReferencePhoneme {
+  index: number;
+  token: string;
+  category: 'vowel' | 'consonant' | string;
+  syllable_position?: string;
+}
+
+export interface BackendAlignmentStep {
+  op: 'match' | 'substitute' | 'insert' | 'delete' | string;
+  ref_token: { symbol: string; category?: string } | null;
+  hyp_token: { symbol: string; category?: string } | null;
+  ref_index: number | null;
+  hyp_index: number | null;
+  error_type?: string;
+  cost?: number;
 }
 
 export interface BackendPhonemeResult {
@@ -52,7 +94,20 @@ export interface BackendPhonemeResult {
     issues?: BackendIssue[];
     feedback?: string;
   };
-  prosody_input?: unknown;
+  prosody_input?: {
+    reference_phonemes?: BackendReferencePhoneme[];
+    [k: string]: unknown;
+  };
+  /** Full debug payload mirroring the saved artifact JSON. We only depend on
+   *  `alignment.coarse.steps` so we can pin each IPA-level issue to its exact
+   *  reference position; everything else is opaque. */
+  full_payload?: {
+    alignment?: {
+      coarse?: {
+        steps?: BackendAlignmentStep[];
+      };
+    };
+  };
 }
 
 export interface BackendProsodyPoint {
@@ -82,6 +137,11 @@ export interface PhonemeResultUi {
   target: string;
   correct: boolean;
   note?: string;
+  /** Expected IPA for this Hangul syllable (e.g. "디" → "ti"). Best-effort:
+   *  derived by grouping reference phonemes around vowel nuclei when the
+   *  backend doesn't provide explicit syllable boundaries. May be undefined
+   *  when syllable count and IPA group count don't agree. */
+  ipa?: string;
 }
 
 export interface IntonationPointUi {
@@ -97,6 +157,8 @@ export interface AnalysisResult {
   message: string;
   scoreBreakdown?: BackendScoreBreakdown;
   phonemes: PhonemeResultUi[];
+  /** IPA-level issue cards from the backend (description + tip in Korean). */
+  issues: IssueCardUi[];
   intonation: IntonationPointUi[];
   intonationWarning: string;
   aiFeedback: string;

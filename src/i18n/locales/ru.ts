@@ -24,6 +24,8 @@ export const ru: KoTranslations = {
     shopping: 'Покупки',
     transport: 'Транспорт',
     cafe: 'Кафе',
+    facility: 'Магазины и жильё',
+    permission: 'Просьба разрешения',
     countSuffix: 'карт: {{count}}',
   },
   cards: {
@@ -44,6 +46,7 @@ export const ru: KoTranslations = {
     typeLabel: 'Категория',
     progress: '{{idx}} / {{total}}',
     exampleAudio: 'Послушать',
+    exampleAudioStop: 'Остановить',
     phonemeHints: 'Подсказки произношения',
     micPrompt: 'Нажмите и говорите',
     micRecording: 'Запись… нажмите для остановки',
@@ -58,12 +61,7 @@ export const ru: KoTranslations = {
   loading: {
     title: 'Анализируем ваш голос',
     subtitle: 'Подождите немного…',
-    steps: {
-      upload: 'Аудио загружено',
-      phoneme: 'Анализ фонем',
-      intonation: 'Извлечение интонации',
-      feedback: 'Подготовка отзыва',
-    },
+    progressLabel: 'Обработка',
     tipLabel: 'Совет',
   },
   tip: {
@@ -78,6 +76,7 @@ export const ru: KoTranslations = {
     totalScore: 'Итог',
     accuracy: '{{correct}}/{{total}} верно',
     phonemeSection: 'Фонемы',
+    issuesTitle: 'Точки коррекции',
     intonation: 'Интонация',
     aiCoaching: 'MalCard AI',
     native: 'Носитель',
@@ -105,7 +104,6 @@ export const ru: KoTranslations = {
     tryAgain: 'Попробуйте ещё!',
   },
   intonation: {
-    empty: 'Нет данных по интонации',
     endRiseLow: 'Слабый подъём в конце',
     endRiseHigh: 'Слишком сильный подъём в конце',
     choppy: 'Сделайте интонацию плавнее',

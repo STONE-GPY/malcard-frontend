@@ -130,7 +130,9 @@ export const decks: Deck[] = [
     titleKey: 'deck.hospital',
     defaultTitle: '병원',
     count: 0,
-    keywords: ['병원', '약', '아프'],
+    // '약은'/'약을' instead of bare '약' so that 예약했어요 doesn't double-count
+    // into hospital alongside cafe (the bare '약' substring matches '예약').
+    keywords: ['병원', '약은', '약을', '아프'],
   },
   {
     id: 'shopping',
@@ -153,8 +155,31 @@ export const decks: Deck[] = [
     emoji: '☕',
     titleKey: 'deck.cafe',
     defaultTitle: '카페',
+    // 'predict' removed from cafe to avoid double-matching '예약했어요' with the
+    // hospital deck (which doesn't currently include it). Kept here because the
+    // cafe context owns the reservation use case in this dataset.
     count: 0,
     keywords: ['자리', '포장', '주문', '예약', '와이파이', '커피', '음료'],
+  },
+  {
+    id: 'facility',
+    emoji: '🏪',
+    titleKey: 'deck.facility',
+    defaultTitle: '편의·숙소',
+    count: 0,
+    // Picks up "편의점 있어요?" and "짐 맡길 수 있어요?" — finding a place /
+    // using lodging-style facilities.
+    keywords: ['편의점', '짐', '호텔', '숙소', '맡길'],
+  },
+  {
+    id: 'permission',
+    emoji: '🙋',
+    titleKey: 'deck.permission',
+    defaultTitle: '양해 구하기',
+    count: 0,
+    // Picks up "이 버튼 눌러도 돼요?" and "여기 앉아도 돼요?" —
+    // asking-for-permission patterns ("...해도 돼요?" + button/seat objects).
+    keywords: ['눌러도', '앉아도', '들어가도', '써도', '먹어도'],
   },
 ];
 
@@ -279,6 +304,7 @@ export const mockResultForDemo: AnalysisResult = {
   status: 'ready' as EvaluationStatus,
   score: 84,
   message: '잘했어요!',
+  issues: [],
   phonemes: [
     { ko: '어', user: '/ʌ/', target: '/ʌ/', correct: true },
     { ko: '디', user: '/di/', target: '/di/', correct: true },

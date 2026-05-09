@@ -61,7 +61,14 @@ export default function ProfilePage() {
     <div
       data-testid="profile-page"
       style={{
-        minHeight: '100%',
+        // Outer is a flex column with TWO children: a scrollable content area
+        // (flex:1, minHeight:0, overflowY:auto) and the fixed-height BottomNav.
+        // We can't put overflow:auto on the outer + flex column directly:
+        // flex children default to flex-shrink:1, so a long settings group
+        // would be squashed instead of overflowing into a scrollbar.
+        // Putting overflow on a flex:1 child with minHeight:0 is the textbook
+        // workaround — content scrolls naturally, BottomNav stays pinned.
+        height: '100%',
         background: tokens.pageBg,
         color: '#0F172A',
         display: 'flex',
@@ -70,7 +77,16 @@ export default function ProfilePage() {
     >
       <div
         style={{
-          padding: `26px ${tokens.pad}px 22px`,
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
+      <div
+        style={{
+          padding: `28px ${tokens.pad}px 26px`,
           background: tokens.primaryGrad,
           color: '#fff',
           position: 'relative',
@@ -114,9 +130,15 @@ export default function ProfilePage() {
               alignItems: 'center',
               justifyContent: 'center',
               color: tokens.primaryDark,
-              fontSize: 28,
+              fontSize: 26,
               fontWeight: 800,
-              letterSpacing: -1,
+              // letterSpacing: -1 was crushing the bottom jamo (ㄱ받침) of '학'
+              // into invisibility — render at natural width with Noto Sans KR.
+              letterSpacing: 0,
+              fontFamily: '"Noto Sans KR", system-ui, sans-serif',
+              lineHeight: 1.2,
+              paddingBottom: 2,
+              flexShrink: 0,
             }}
           >
             {currentLang === 'ru' ? 'У' : currentLang === 'en' ? 'L' : '학'}
@@ -185,16 +207,17 @@ export default function ProfilePage() {
 
       <div
         style={{
-          margin: `-18px ${tokens.pad}px 0`,
+          // Previously this card overlapped the header with margin-top: -18px,
+          // which hid the XP progress bar above. Sit cleanly below the header
+          // instead so both the XP bar and the stats are fully visible.
+          margin: `${tokens.gap + 8}px ${tokens.pad}px 0`,
           padding: 14,
           background: '#FFFFFF',
           borderRadius: tokens.radiusLg,
           border: tokens.border,
-          boxShadow: '0 12px 32px -16px rgba(15,23,42,0.18)',
+          boxShadow: tokens.shadowSm,
           display: 'grid',
           gridTemplateColumns: 'repeat(3, 1fr)',
-          position: 'relative',
-          zIndex: 2,
         }}
       >
         {[
@@ -391,15 +414,16 @@ export default function ProfilePage() {
         />
       </SettingsGroup>
 
-      <div
-        style={{
-          padding: '20px 0 24px',
-          textAlign: 'center',
-          fontSize: 11,
-          color: '#CBD5E1',
-        }}
-      >
-        {t('profile.footer')}
+        <div
+          style={{
+            padding: '20px 0 24px',
+            textAlign: 'center',
+            fontSize: 11,
+            color: '#CBD5E1',
+          }}
+        >
+          {t('profile.footer')}
+        </div>
       </div>
 
       <BottomNav />
@@ -490,11 +514,19 @@ function SettingRow({
         display: 'flex',
         alignItems: 'center',
         gap: 12,
-        padding: '13px 14px',
+        padding: '14px 14px',
         width: '100%',
         textAlign: 'left',
         background: 'transparent',
         border: 'none',
+        // Button defaults (font, line-height, box-sizing) differ from div and
+        // were squashing the row vertically so the sub label visually merged
+        // into the next row. Pin every metric so button and div render the same.
+        font: 'inherit',
+        color: 'inherit',
+        lineHeight: 1.4,
+        boxSizing: 'border-box',
+        cursor: onClick ? 'pointer' : 'default',
       }}
     >
       <div
@@ -518,6 +550,7 @@ function SettingRow({
             fontSize: 14.5,
             fontWeight: 600,
             letterSpacing: -0.2,
+            lineHeight: 1.35,
             whiteSpace: 'nowrap',
             overflow: 'hidden',
             textOverflow: 'ellipsis',
@@ -526,7 +559,21 @@ function SettingRow({
         >
           {label}
         </div>
-        {sub && <div style={{ fontSize: 12, color: '#64748B', marginTop: 1 }}>{sub}</div>}
+        {sub && (
+          <div
+            style={{
+              fontSize: 12,
+              color: '#64748B',
+              marginTop: 2,
+              lineHeight: 1.4,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+            }}
+          >
+            {sub}
+          </div>
+        )}
       </div>
       {trailing}
     </Component>

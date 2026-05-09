@@ -2,8 +2,36 @@ import type { ApiErrorBody } from '../types';
 
 export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8000';
 
+// Compile-time default from .env.* files. Code paths that need to react to the
+// dev-panel toggle should call useMockApi() instead of reading this constant.
 export const USE_MOCK_API =
   (import.meta.env.VITE_USE_MOCK_API as string | undefined)?.toLowerCase() !== 'false';
+
+const MOCK_OVERRIDE_KEY = 'mc-dev-mock-mode';
+
+// Runtime override: returns true/false from localStorage if set, otherwise the
+// env-var default. Lets the in-app dev panel switch between mock and the real
+// backend without editing .env.local. Reads on every call so a panel change
+// takes effect on the next analyze()/listCards() invocation.
+export function useMockApi(): boolean {
+  try {
+    const v = localStorage.getItem(MOCK_OVERRIDE_KEY);
+    if (v === 'true') return true;
+    if (v === 'false') return false;
+  } catch {
+    /* localStorage may be blocked — fall through to env default */
+  }
+  return USE_MOCK_API;
+}
+
+export function setMockApiOverride(value: boolean | null) {
+  try {
+    if (value === null) localStorage.removeItem(MOCK_OVERRIDE_KEY);
+    else localStorage.setItem(MOCK_OVERRIDE_KEY, value ? 'true' : 'false');
+  } catch {
+    /* ignore */
+  }
+}
 
 export class ApiError extends Error {
   code: string;

@@ -127,13 +127,25 @@ export default function HistoryPage() {
     <div
       data-testid="history-page"
       style={{
-        minHeight: '100%',
+        // Outer is flex column; inner wrapper owns the scroll.
+        // (Putting overflow:auto + flex column on the SAME element causes
+        // children to flex-shrink instead of overflowing into a scrollbar.)
+        height: '100%',
         background: tokens.pageBg,
         color: '#0F172A',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
       <div style={{ padding: `28px ${tokens.pad}px 14px` }}>
         <div
           style={{
@@ -447,6 +459,7 @@ export default function HistoryPage() {
             </div>
           </div>
         ))}
+      </div>
       </div>
 
       <BottomNav />

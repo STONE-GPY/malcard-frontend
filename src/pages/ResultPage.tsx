@@ -1,4 +1,4 @@
-import { useEffect, useRef, type CSSProperties, type ReactNode } from 'react';
+import { useEffect, useMemo, useRef, type CSSProperties, type ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import {
@@ -88,6 +88,36 @@ function interpolate(template: string, vars: Record<string, string | number>): s
   return template.replace(/\{\{(\w+)\}\}/g, (_, key) => String(vars[key] ?? ''));
 }
 
+// Render an IPA string with substrings matching any of `targets` underlined
+// in red — visually links the syllable card to the IPA-level issue cards.
+function renderIpaWithHighlight(ipa: string, targets: string[]): ReactNode {
+  // Sort by length so longer matches (e.g. "jʌ") win over shorter ones ("j").
+  const sorted = [...targets].filter(Boolean).sort((a, b) => b.length - a.length);
+  if (sorted.length === 0) return ipa;
+  const out: ReactNode[] = [];
+  let i = 0;
+  while (i < ipa.length) {
+    const hit = sorted.find((t) => ipa.startsWith(t, i));
+    if (hit) {
+      out.push(
+        <span
+          key={`h-${i}`}
+          style={{ color: '#991B1B', fontWeight: 800, textDecoration: 'underline' }}
+        >
+          {hit}
+        </span>,
+      );
+      i += hit.length;
+    } else {
+      let j = i + 1;
+      while (j < ipa.length && !sorted.some((t) => ipa.startsWith(t, j))) j++;
+      out.push(<span key={`p-${i}`}>{ipa.slice(i, j)}</span>);
+      i = j;
+    }
+  }
+  return out;
+}
+
 export default function ResultPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
@@ -162,7 +192,11 @@ export default function ResultPage() {
   // Error path
   if (analysisError) {
     return (
-      <PageShell title={t('result.title')} onClose={handleClose}>
+      <PageShell
+        title={t('result.title')}
+        onClose={handleClose}
+        actions={<ActionsBar onRetry={handleRetry} onNext={handleNext} />}
+      >
         <div
           data-testid="result-error"
           style={{
@@ -185,7 +219,6 @@ export default function ResultPage() {
             {t('result.errorCode', { code: analysisError.code })}
           </div>
         </div>
-        <ActionsBar onRetry={handleRetry} onNext={handleNext} />
       </PageShell>
     );
   }
@@ -198,7 +231,11 @@ export default function ResultPage() {
   if (r.status === 'retry' || r.status === 'discarded') {
     const isRetry = r.status === 'retry';
     return (
-      <PageShell title={t('result.title')} onClose={handleClose}>
+      <PageShell
+        title={t('result.title')}
+        onClose={handleClose}
+        actions={<ActionsBar onRetry={handleRetry} onNext={handleNext} />}
+      >
         <div
           data-testid={isRetry ? 'retry-banner' : 'discarded-banner'}
           style={{
@@ -232,18 +269,45 @@ export default function ResultPage() {
           </div>
         </div>
         <FeedbackBubble text={resolveFeedback(t, r.aiFeedback)} />
-        <ActionsBar onRetry={handleRetry} onNext={handleNext} />
       </PageShell>
     );
   }
 
   // ready
-  const correctCount = r.phonemes.filter((p) => p.correct).length;
+  // Use the precise syllable list each issue card resolved to (via alignment
+  // ref_index) instead of "any syllable containing the IPA token". This keeps
+  // 서/려 from being flagged when the actual issue was only at 어, and lets
+  // each syllable highlight its OWN matching tokens rather than every issue's.
+  const flaggedSyllables = useMemo(
+    () => new Set(r.issues.flatMap((i) => i.relatedSyllables)),
+    [r.issues],
+  );
+  const tokensForSyllable = useMemo(() => {
+    const map = new Map<string, string[]>();
+    for (const iss of r.issues) {
+      if (!iss.refToken || iss.refToken === '∅') continue;
+      for (const syl of iss.relatedSyllables) {
+        const arr = map.get(syl) ?? [];
+        if (!arr.includes(iss.refToken)) arr.push(iss.refToken);
+        map.set(syl, arr);
+      }
+    }
+    return map;
+  }, [r.issues]);
+  const isFlagged = (ko: string) => flaggedSyllables.has(ko);
+  const flaggedCount = r.phonemes.filter(
+    (p) => !p.correct || isFlagged(p.ko),
+  ).length;
+  const correctCount = r.phonemes.length - flaggedCount;
   const wrongPhoneme = r.phonemes.find((p) => !p.correct);
   const attempts = recentAttempts(history, String(currentCard.id));
 
   return (
-    <PageShell title={t('result.title')} onClose={handleClose}>
+    <PageShell
+      title={t('result.title')}
+      onClose={handleClose}
+      actions={<ActionsBar onRetry={handleRetry} onNext={handleNext} />}
+    >
       <div
         data-testid="score-card"
         style={{
@@ -275,7 +339,7 @@ export default function ResultPage() {
           }}
         />
         <ScoreRing score={r.score} />
-        <div style={{ flex: 1, position: 'relative' }}>
+        <div style={{ flex: 1, minWidth: 0, position: 'relative' }}>
           <div
             style={{
               fontSize: 12,
@@ -283,6 +347,7 @@ export default function ResultPage() {
               letterSpacing: 1.4,
               textTransform: 'uppercase',
               opacity: 0.8,
+              lineHeight: 1.3,
             }}
           >
             {t('result.totalScore')}
@@ -292,8 +357,8 @@ export default function ResultPage() {
               fontSize: 22,
               fontWeight: 700,
               letterSpacing: -0.4,
-              marginTop: 4,
-              lineHeight: 1.15,
+              marginTop: 6,
+              lineHeight: 1.25,
             }}
           >
             {t(r.message)}
@@ -301,10 +366,14 @@ export default function ResultPage() {
           <div
             style={{
               fontFamily: '"Noto Sans KR", system-ui',
-              fontSize: 14,
-              marginTop: 10,
-              opacity: 0.95,
+              fontSize: 13,
+              marginTop: 8,
+              opacity: 0.92,
               fontWeight: 500,
+              lineHeight: 1.4,
+              whiteSpace: 'nowrap',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
             }}
           >
             «{currentCard.korean}»
@@ -407,60 +476,72 @@ export default function ResultPage() {
           </div>
         </div>
         <div style={{ display: 'flex', flexWrap: 'wrap', gap: 8, marginBottom: 4 }}>
-          {r.phonemes.map((p, i) => (
-            <div
-              key={i}
-              style={{
-                flex: '1 1 auto',
-                minWidth: 64,
-                padding: '10px 8px',
-                borderRadius: tokens.radiusSm,
-                background: p.correct ? '#ECFDF5' : '#FEF2F2',
-                border: `1.5px solid ${p.correct ? '#A7F3D0' : '#FECACA'}`,
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 4,
-              }}
-            >
-              <span
+          {r.phonemes.map((p, i) => {
+            const flagged = !p.correct || isFlagged(p.ko);
+            const sylTokens = tokensForSyllable.get(p.ko) ?? [];
+            return (
+              <div
+                key={i}
                 style={{
-                  fontFamily: '"Noto Sans KR", system-ui',
-                  fontSize: 22,
-                  fontWeight: 700,
-                  color: p.correct ? '#065F46' : '#991B1B',
-                  lineHeight: 1,
+                  flex: '1 1 auto',
+                  minWidth: 64,
+                  padding: '10px 8px',
+                  borderRadius: tokens.radiusSm,
+                  background: flagged ? '#FEF2F2' : '#ECFDF5',
+                  border: `1.5px solid ${flagged ? '#FECACA' : '#A7F3D0'}`,
+                  display: 'flex',
+                  flexDirection: 'column',
+                  alignItems: 'center',
+                  gap: 4,
                 }}
               >
-                {p.ko}
-              </span>
-              {p.correct ? (
-                p.target && (
-                  <span style={{ fontSize: 11, color: '#10B981', fontWeight: 600 }}>
-                    {p.target}
-                  </span>
-                )
-              ) : (
-                <div
+                <span
                   style={{
-                    display: 'flex',
-                    alignItems: 'center',
-                    gap: 3,
-                    fontSize: 10,
-                    fontWeight: 600,
+                    fontFamily: '"Noto Sans KR", system-ui',
+                    fontSize: 22,
+                    fontWeight: 700,
+                    color: flagged ? '#991B1B' : '#065F46',
+                    lineHeight: 1,
                   }}
                 >
-                  {p.user && (
-                    <span style={{ color: '#DC2626', textDecoration: 'line-through' }}>
-                      {p.user}
-                    </span>
-                  )}
-                  <span style={{ color: '#94A3B8' }}>→</span>
-                  <span style={{ color: '#10B981' }}>{p.target}</span>
-                </div>
-              )}
-            </div>
-          ))}
+                  {p.ko}
+                </span>
+                {p.ipa ? (
+                  <span
+                    style={{
+                      fontSize: 11,
+                      fontWeight: 600,
+                      letterSpacing: 0.2,
+                      color: flagged ? '#DC2626' : '#10B981',
+                      fontFamily: '"Noto Sans", system-ui',
+                    }}
+                  >
+                    {flagged && sylTokens.length > 0
+                      ? renderIpaWithHighlight(p.ipa, sylTokens)
+                      : p.ipa}
+                  </span>
+                ) : !p.correct ? (
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 3,
+                      fontSize: 10,
+                      fontWeight: 600,
+                    }}
+                  >
+                    {p.user && (
+                      <span style={{ color: '#DC2626', textDecoration: 'line-through' }}>
+                        {p.user}
+                      </span>
+                    )}
+                    <span style={{ color: '#94A3B8' }}>→</span>
+                    <span style={{ color: '#10B981' }}>{p.target}</span>
+                  </div>
+                ) : null}
+              </div>
+            );
+          })}
         </div>
         {wrongPhoneme && (
           <div
@@ -503,6 +584,137 @@ export default function ResultPage() {
           </div>
         )}
       </div>
+
+      {r.issues.length > 0 && (
+        <div style={sectionStyle} data-testid="issues-section">
+          <div
+            style={{
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'space-between',
+              marginBottom: 12,
+            }}
+          >
+            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>
+              {t('result.issuesTitle')}
+            </div>
+            <div
+              style={{
+                fontSize: 11,
+                fontWeight: 600,
+                color: '#94A3B8',
+                fontVariantNumeric: 'tabular-nums',
+              }}
+            >
+              {r.issues.length}
+            </div>
+          </div>
+          <div style={{ display: 'flex', flexDirection: 'column', gap: 10 }}>
+            {r.issues.map((iss, i) => {
+              const sevColor =
+                iss.severity === 'high'
+                  ? '#DC2626'
+                  : iss.severity === 'medium'
+                    ? '#D97706'
+                    : '#6366F1';
+              const sevBg =
+                iss.severity === 'high'
+                  ? '#FEF2F2'
+                  : iss.severity === 'medium'
+                    ? '#FFFBEB'
+                    : tokens.primarySoft;
+              return (
+                <div
+                  key={i}
+                  style={{
+                    padding: 12,
+                    borderRadius: tokens.radiusSm,
+                    background: sevBg,
+                    border: `1px solid ${sevColor}33`,
+                    display: 'flex',
+                    flexDirection: 'column',
+                    gap: 6,
+                  }}
+                >
+                  <div
+                    style={{
+                      display: 'flex',
+                      alignItems: 'center',
+                      gap: 8,
+                      fontSize: 13,
+                      fontWeight: 600,
+                      flexWrap: 'wrap',
+                    }}
+                  >
+                    <code
+                      style={{
+                        background: '#FEE2E2',
+                        color: '#991B1B',
+                        padding: '2px 7px',
+                        borderRadius: 6,
+                        fontSize: 13,
+                      }}
+                    >
+                      {iss.hypToken}
+                    </code>
+                    <span style={{ color: '#94A3B8' }}>→</span>
+                    <code
+                      style={{
+                        background: '#DCFCE7',
+                        color: '#065F46',
+                        padding: '2px 7px',
+                        borderRadius: 6,
+                        fontSize: 13,
+                      }}
+                    >
+                      {iss.refToken}
+                    </code>
+                    {iss.relatedSyllables.length > 0 && (
+                      <span
+                        style={{
+                          marginLeft: 'auto',
+                          display: 'inline-flex',
+                          alignItems: 'center',
+                          gap: 4,
+                          fontSize: 12,
+                          fontWeight: 600,
+                          color: sevColor,
+                          background: '#FFFFFF',
+                          padding: '2px 8px',
+                          borderRadius: 999,
+                          border: `1px solid ${sevColor}33`,
+                        }}
+                      >
+                        <span style={{ opacity: 0.7 }}>📍</span>
+                        <span style={{ fontFamily: '"Noto Sans KR", system-ui' }}>
+                          {iss.relatedSyllables.join(' · ')}
+                        </span>
+                      </span>
+                    )}
+                  </div>
+                  {iss.description && (
+                    <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.45 }}>
+                      {iss.description}
+                    </div>
+                  )}
+                  {iss.tip && (
+                    <div
+                      style={{
+                        fontSize: 12,
+                        color: sevColor,
+                        lineHeight: 1.4,
+                        marginTop: 2,
+                      }}
+                    >
+                      💡 {iss.tip}
+                    </div>
+                  )}
+                </div>
+              );
+            })}
+          </div>
+        </div>
+      )}
 
       {r.prosodyExecuted && r.intonation.length > 0 && (
         <div style={sectionStyle} data-testid="intonation-section">
@@ -656,7 +868,6 @@ export default function ResultPage() {
       </div>
 
       <FeedbackBubble text={resolveFeedback(t, r.aiFeedback)} />
-      <ActionsBar onRetry={handleRetry} onNext={handleNext} />
     </PageShell>
   );
 }
@@ -688,10 +899,12 @@ function resolveFeedback(
 function PageShell({
   title,
   onClose,
+  actions,
   children,
 }: {
   title: string;
   onClose: () => void;
+  actions?: ReactNode;
   children: ReactNode;
 }) {
   const { t } = useTranslation();
@@ -699,13 +912,27 @@ function PageShell({
     <div
       data-testid="result-page"
       style={{
-        minHeight: '100%',
+        // Outer is flex column; the middle wrapper owns the scroll.
+        // Actions bar (if any) sits OUTSIDE the scroll wrapper so it is always
+        // pinned to the bottom of the page (no need for sticky/marginTop:auto
+        // tricks). Putting overflow:auto on the same element as flex column
+        // would shrink children instead of scrolling — see ProfilePage fix.
+        height: '100%',
         background: tokens.pageBg,
         color: '#0F172A',
         display: 'flex',
         flexDirection: 'column',
       }}
     >
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+        }}
+      >
       <div
         style={{
           padding: `26px ${tokens.pad}px 14px`,
@@ -736,6 +963,8 @@ function PageShell({
         </button>
       </div>
       {children}
+      </div>
+      {actions}
     </div>
   );
 }

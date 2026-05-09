@@ -5,24 +5,13 @@ import { useCardStore } from '../stores/useCardStore';
 import { analyzer } from '../lib/analyzer';
 import { tokens } from '../theme/tokens';
 import { tipKeys } from '../data/cards';
-import { IconCheck, IconSparkle } from '../components/icons';
+import { IconSparkle } from '../components/icons';
 import { ApiError } from '../api/client';
-import type { AnalysisStep } from '../types';
-
-const STEP_ORDER: AnalysisStep[] = ['upload', 'phoneme', 'intonation', 'feedback'];
-const STEP_KEYS = [
-  'loading.steps.upload',
-  'loading.steps.phoneme',
-  'loading.steps.intonation',
-  'loading.steps.feedback',
-];
 
 export default function LoadingPage() {
   const navigate = useNavigate();
   const { t } = useTranslation();
   const {
-    analysisStep,
-    setAnalysisStep,
     setAnalysisResult,
     setAnalysisError,
     audioBlob,
@@ -39,16 +28,10 @@ export default function LoadingPage() {
 
     const controller = new AbortController();
     let cancelled = false;
-    setAnalysisStep('upload');
     setAnalysisError(null);
 
     analyzer
-      .analyze(audioBlob, currentCard, {
-        onStep: (step) => {
-          if (!cancelled) setAnalysisStep(step);
-        },
-        signal: controller.signal,
-      })
+      .analyze(audioBlob, currentCard, { signal: controller.signal })
       .then((result) => {
         if (cancelled) return;
         setAnalysisResult(result);
@@ -72,17 +55,18 @@ export default function LoadingPage() {
       cancelled = true;
       controller.abort();
     };
-  }, [audioBlob, currentCard, navigate, setAnalysisError, setAnalysisResult, setAnalysisStep]);
-
-  const currentIdx = STEP_ORDER.indexOf(analysisStep);
-  const stepStatus = (i: number) =>
-    i < currentIdx ? 'done' : i === currentIdx ? 'active' : 'wait';
+  }, [audioBlob, currentCard, navigate, setAnalysisError, setAnalysisResult]);
 
   return (
     <div
       data-testid="loading-page"
       style={{
-        minHeight: '100%',
+        // Own the scroll inside #root. Loading is short, but consistent with
+        // the rest of the app — and safe if step descriptions ever grow.
+        height: '100%',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain',
         background: tokens.bgGrad,
         color: '#0F172A',
         display: 'flex',
@@ -138,11 +122,16 @@ export default function LoadingPage() {
         </div>
       </div>
 
+      {/*
+        Indeterminate progress bar — honest abstraction. The backend is
+        monolithic (no per-step events) so showing a 4-step checklist
+        misled users into thinking the pipeline had reached "feedback
+        generation" even on retry/discarded paths that abort early at the
+        audio gate. A continuous shimmer just says "we're working" without
+        claiming to know which stage.
+      */}
       <div
         style={{
-          display: 'flex',
-          flexDirection: 'column',
-          gap: 10,
           background: '#FFFFFF',
           borderRadius: tokens.radiusLg,
           padding: 16,
@@ -151,73 +140,60 @@ export default function LoadingPage() {
           marginBottom: 14,
         }}
       >
-        {STEP_KEYS.map((key, i) => {
-          const s = stepStatus(i);
-          return (
-            <div
-              key={i}
-              style={{
-                display: 'flex',
-                alignItems: 'center',
-                gap: 12,
-                padding: '8px 6px',
-                opacity: s === 'wait' ? 0.5 : 1,
-                transition: 'opacity 0.3s ease',
-              }}
-            >
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            justifyContent: 'space-between',
+            marginBottom: 10,
+          }}
+        >
+          <span
+            style={{
+              fontSize: 13,
+              fontWeight: 600,
+              color: '#0F172A',
+              letterSpacing: -0.1,
+            }}
+          >
+            {t('loading.progressLabel')}
+          </span>
+          <div style={{ display: 'flex', gap: 4 }} aria-hidden="true">
+            {[0, 1, 2].map((d) => (
               <div
+                key={d}
                 style={{
-                  width: 28,
-                  height: 28,
+                  width: 5,
+                  height: 5,
                   borderRadius: '50%',
-                  background:
-                    s === 'done'
-                      ? '#10B981'
-                      : s === 'active'
-                        ? tokens.primaryGradFlat
-                        : '#E2E8F0',
-                  color: '#fff',
-                  display: 'flex',
-                  alignItems: 'center',
-                  justifyContent: 'center',
-                  fontSize: 13,
-                  fontWeight: 700,
-                  flexShrink: 0,
-                  boxShadow: s === 'active' ? `0 0 0 4px ${tokens.primarySoft}` : 'none',
+                  background: tokens.primary,
+                  animation: `mc-dots 1.2s ease-in-out ${d * 0.16}s infinite`,
                 }}
-              >
-                {s === 'done' ? <IconCheck size={16} stroke={3} /> : i + 1}
-              </div>
-              <div
-                style={{
-                  fontSize: 14,
-                  fontWeight: s === 'wait' ? 500 : 600,
-                  color: s === 'wait' ? '#94A3B8' : '#0F172A',
-                  flex: 1,
-                  letterSpacing: -0.1,
-                }}
-              >
-                {t(key)}
-              </div>
-              {s === 'active' && (
-                <div style={{ display: 'flex', gap: 4 }}>
-                  {[0, 1, 2].map((d) => (
-                    <div
-                      key={d}
-                      style={{
-                        width: 5,
-                        height: 5,
-                        borderRadius: '50%',
-                        background: tokens.primary,
-                        animation: `mc-dots 1.2s ease-in-out ${d * 0.16}s infinite`,
-                      }}
-                    />
-                  ))}
-                </div>
-              )}
-            </div>
-          );
-        })}
+              />
+            ))}
+          </div>
+        </div>
+        <div
+          role="progressbar"
+          aria-label={t('loading.title')}
+          style={{
+            height: 8,
+            borderRadius: 999,
+            background: tokens.primarySoft,
+            overflow: 'hidden',
+            position: 'relative',
+          }}
+        >
+          <div
+            style={{
+              position: 'absolute',
+              inset: 0,
+              borderRadius: 999,
+              background: `linear-gradient(90deg, transparent 0%, ${tokens.primary} 50%, transparent 100%)`,
+              animation: 'mc-progress-sweep 1.6s ease-in-out infinite',
+            }}
+          />
+        </div>
       </div>
 
       <div

@@ -30,3 +30,5 @@ screenshots/
 .playwright-mcp/
 test-results/
 playwright-report/
+integration-smoke.png
+temp_cards.json

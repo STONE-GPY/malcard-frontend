@@ -24,7 +24,11 @@ export default function DailyCompletePage() {
     <div
       data-testid="daily-complete"
       style={{
-        minHeight: '100%',
+        // Own the scroll inside #root, consistent with the rest of the app.
+        height: '100%',
+        overflowY: 'auto',
+        WebkitOverflowScrolling: 'touch',
+        overscrollBehavior: 'contain',
         background: tokens.bgGrad,
         color: '#0F172A',
         display: 'flex',

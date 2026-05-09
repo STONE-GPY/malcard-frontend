@@ -31,11 +31,21 @@ export function useCards(categoryId: CategoryId): UseCardsState {
     setLoading(true);
     setError(null);
 
-    listCards({ type: cat?.apiType, limit: 50, offset: 0, signal: controller.signal })
+    // Always fetch the full set and filter client-side. The backend's
+    // GET /cards?type=... filter is broken in the current build (compares
+    // against c["category"] but the dataset stores the value under c["type"]),
+    // so server-side filtering returns 0 items for every category. Per the
+    // user's request we don't modify the backend; instead we fetch all cards
+    // once and slice by apiType in the client.
+    listCards({ limit: 200, offset: 0, signal: controller.signal })
       .then((res) => {
         if (reqId !== reqRef.current) return;
-        setCards(toUiCards(res.items));
-        setTotal(res.total);
+        const ui = toUiCards(res.items);
+        const filtered = cat?.apiType
+          ? ui.filter((c) => c.type === cat.apiType)
+          : ui;
+        setCards(filtered);
+        setTotal(filtered.length);
       })
       .catch((err) => {
         if (controller.signal.aborted) return;

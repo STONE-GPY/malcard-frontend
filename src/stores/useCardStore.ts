@@ -29,6 +29,10 @@ interface CardStore {
   setAnalysisError: (err: { code: string; message: string } | null) => void;
 }
 
+interface WindowWithStore extends Window {
+  __cardStore?: typeof useCardStore;
+}
+
 export const useCardStore = create<CardStore>((set, get) => ({
   selectedCategory: 'all',
   setCategory: (category) => set({ selectedCategory: category }),
@@ -69,3 +73,10 @@ export const useCardStore = create<CardStore>((set, get) => ({
   analysisError: null,
   setAnalysisError: (err) => set({ analysisError: err }),
 }));
+
+// Expose the store on window in dev so the in-browser dev panel and
+// integration tests can manipulate state without going through the full
+// mic/recording flow. Stripped from production builds.
+if (import.meta.env.DEV && typeof window !== 'undefined') {
+  (window as WindowWithStore).__cardStore = useCardStore;
+}
