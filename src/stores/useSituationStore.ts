@@ -1,6 +1,16 @@
 import { create } from 'zustand';
 import type { Situation } from '../types';
 
+export function shuffleArray<T>(array: T[]): T[] {
+  const newArray = [...array];
+  for (let i = newArray.length - 1; i > 0; i--) {
+    const j = Math.floor(Math.random() * (i + 1));
+    [newArray[i], newArray[j]] = [newArray[j], newArray[i]];
+  }
+  return newArray;
+}
+
+
 export type StepType = 'dialogue' | 'puzzle' | 'speak' | 'result';
 
 export interface Slot {
@@ -80,10 +90,31 @@ export const useSituationStore = create<SituationState>((set, get) => ({
     const puzzle = currentSituation.puzzles[currentPuzzleIndex];
     if (!puzzle) return;
 
+    // Shuffle the puzzle answer to generate initialWords dynamically on initialization
+    let initialWords = shuffleArray(puzzle.answer);
+    if (puzzle.answer.length > 1) {
+      let attempts = 0;
+      while (
+        JSON.stringify(initialWords) === JSON.stringify(puzzle.answer) &&
+        attempts < 5
+      ) {
+        initialWords = shuffleArray(puzzle.answer);
+        attempts++;
+      }
+    }
+
+    // Create a new situation object with the mutated puzzle
+    const newPuzzles = [...currentSituation.puzzles];
+    newPuzzles[currentPuzzleIndex] = {
+      ...puzzle,
+      initialWords,
+    };
+
     // Initialize slots with nulls, equal to the length of the answer
     const initialSlots = Array(puzzle.answer.length).fill(null);
 
     set({
+      currentSituation: { ...currentSituation, puzzles: newPuzzles },
       slots: initialSlots,
       usedWordIndices: [],
       hintCount: 0,

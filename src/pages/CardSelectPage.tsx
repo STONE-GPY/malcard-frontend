@@ -1,4 +1,6 @@
 import { useEffect, useMemo, useState } from 'react';
+import { situations } from '../data/situations';
+import type { Situation } from '../types';
 import { useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useCardStore } from '../stores/useCardStore';
@@ -25,6 +27,7 @@ export default function CardSelectPage() {
   // Reset deck filter whenever the category tab changes (e.g. user moves away
   // from 상황 to 일상 — a deck filter from 상황 wouldn't make sense).
   useEffect(() => {
+    // eslint-disable-next-line react-hooks/set-state-in-effect
     setSelectedDeckId(null);
   }, [selectedCategory]);
 
@@ -292,7 +295,19 @@ export default function CardSelectPage() {
             {t('cards.empty')}
           </div>
         )}
-        {!loading && !error && visibleCards.map((card) => (
+        {selectedCategory === 'situations' ? (
+          <>
+            {!loading && !error && situations.map((situation) => (
+              <SituationCardItem
+                key={situation.id}
+                situation={situation}
+                onClick={() => navigate(`/situations/${situation.id}/step1`)}
+              />
+            ))}
+          </>
+        ) : (
+          <>
+            {!loading && !error && visibleCards.map((card) => (
           <button
             key={card.id}
             onClick={() => handleCardClick(card)}
@@ -376,11 +391,55 @@ export default function CardSelectPage() {
             <IconChevronRight size={18} style={{ color: '#CBD5E1', flexShrink: 0 }} />
           </button>
         ))}
+          </>
+        )}
       </div>
       </div>
 
       <BottomNav />
     </div>
+  );
+}
+
+
+function SituationCardItem({ situation, onClick }: { situation: Situation, onClick: () => void }) {
+  const meta = difficultyMeta[situation.difficulty || 'medium'];
+  return (
+    <button
+      onClick={onClick}
+      style={{
+        display: 'flex',
+        alignItems: 'center',
+        background: '#FFFFFF',
+        padding: '16px',
+        borderRadius: tokens.radiusMd,
+        border: 'none',
+        boxShadow: '0 2px 4px rgba(15,23,42,0.03), 0 8px 16px -8px rgba(15,23,42,0.04)',
+        textAlign: 'left',
+        cursor: 'pointer',
+        width: '100%',
+        marginBottom: '12px'
+      }}
+    >
+      <div style={{
+        fontSize: 32, marginRight: 16, width: 48, height: 48,
+        display: 'flex', alignItems: 'center', justifyContent: 'center',
+        background: '#F8FAFC', borderRadius: '50%'
+      }}>
+        {situation.icon}
+      </div>
+      <div style={{ flex: 1, minWidth: 0 }}>
+        <div style={{ display: 'flex', alignItems: 'center', gap: 6, marginBottom: 4 }}>
+          <span style={{ fontSize: 13, fontWeight: 600, color: '#64748B' }}>{situation.unit_title || '상황'}</span>
+          <span style={{ fontSize: 11, padding: '2px 6px', borderRadius: 999, background: meta.bg, color: meta.color, fontWeight: 700 }}>
+            {meta.label}
+          </span>
+        </div>
+        <div style={{ fontSize: 16, fontWeight: 700, color: '#0F172A', marginBottom: 2 }}>{situation.title}</div>
+        <div style={{ fontSize: 13, color: '#94A3B8' }}>{situation.puzzles?.length || 0}문장 • {situation.location}</div>
+      </div>
+      <IconChevronRight size={20} style={{ color: "#CBD5E1" }} />
+    </button>
   );
 }
 

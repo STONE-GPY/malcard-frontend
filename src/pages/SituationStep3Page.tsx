@@ -17,8 +17,9 @@ export default function SituationStep3Page() {
 
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [feedback, setFeedback] = useState<'idle' | 'success' | 'fail'>('idle');
+  const [feedback, setFeedback] = useState<'idle' | 'success' | 'fail' | 'error'>('idle');
   const [failCount, setFailCount] = useState(0);
+  const [errorMessage, setErrorMessage] = useState('');
 
   const recognitionRef = useRef<any>(null);
 
@@ -29,6 +30,13 @@ export default function SituationStep3Page() {
   }, [currentSituation, id, navigate]);
 
   useEffect(() => {
+    if (!SpeechRecognition) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      setFeedback('error');
+      setErrorMessage('이 브라우저에서는 음성 인식 기능을 지원하지 않습니다. 건너뛰기를 눌러주세요.');
+      return;
+    }
+
     if (SpeechRecognition) {
       const recognition = new SpeechRecognition();
       recognition.continuous = false;
@@ -56,6 +64,13 @@ export default function SituationStep3Page() {
       recognition.onerror = (event: any) => {
         console.error('Speech recognition error', event.error);
         setIsRecording(false);
+
+      setFeedback('error');
+        setErrorMessage(
+          event.error === 'not-allowed'
+            ? '마이크 권한이 거부되었습니다. 브라우저 설정에서 마이크를 허용하거나 건너뛰기를 눌러주세요.'
+            : '음성 인식 중 오류가 발생했습니다. 다시 시도하거나 건너뛰기를 눌러주세요.'
+        );
       };
 
       recognitionRef.current = recognition;
@@ -143,8 +158,13 @@ export default function SituationStep3Page() {
               다시 한번 말해보세요 (틀린 횟수: {failCount})
             </div>
           )}
+          {feedback === 'error' && (
+            <div style={{ color: '#EF4444', fontSize: 14, marginBottom: 20, maxWidth: '80%', lineHeight: 1.5 }}>
+              {errorMessage}
+            </div>
+          )}
 
-          {feedback !== 'success' && (failCount < 3) ? (
+          {feedback !== 'success' && feedback !== 'error' && (failCount < 3) ? (
             <button
               onClick={handleMicClick}
               style={{

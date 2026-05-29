@@ -11,6 +11,7 @@ export default function SituationStep1Page() {
   const navigate = useNavigate();
   const { initSituation, currentSituation } = useSituationStore();
   const [loading, setLoading] = useState(true);
+  const [error, setError] = useState(false);
 
   useEffect(() => {
     async function load() {
@@ -20,6 +21,7 @@ export default function SituationStep1Page() {
         initSituation(sit);
       } catch (err) {
         console.error('Failed to load situation', err);
+        setError(true);
       } finally {
         setLoading(false);
       }
@@ -27,8 +29,36 @@ export default function SituationStep1Page() {
     load();
   }, [id, initSituation]);
 
-  if (loading || !currentSituation) {
-    return <div style={{ padding: 20 }}>Loading...</div>;
+  if (loading) {
+    return <div style={{ padding: 20, textAlign: 'center' }}>로딩 중...</div>;
+  }
+
+  if (error || !currentSituation || currentSituation.id !== id) {
+    return (
+      <div style={{ display: 'flex', flexDirection: 'column', height: '100%', background: tokens.pageBg }}>
+        <TopBar title="오류" onBack={() => navigate('/')} />
+        <div style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+          <div style={{ fontSize: 48, marginBottom: 16 }}>⚠️</div>
+          <div style={{ fontSize: 18, fontWeight: 'bold', color: '#0F172A', marginBottom: 24 }}>
+            상황을 찾을 수 없습니다.
+          </div>
+          <button
+            onClick={() => navigate('/')}
+            style={{
+              padding: '12px 24px',
+              background: tokens.primaryGradFlat,
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: tokens.radiusMd,
+              fontWeight: 'bold',
+              cursor: 'pointer'
+            }}
+          >
+            홈으로 돌아가기
+          </button>
+        </div>
+      </div>
+    );
   }
 
   const handleNext = () => {

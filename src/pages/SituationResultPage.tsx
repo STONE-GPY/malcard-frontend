@@ -1,13 +1,22 @@
-import { useNavigate } from 'react-router-dom';
+import { useEffect } from 'react';
+import { useParams, useNavigate } from 'react-router-dom';
 import { useSituationStore } from '../stores/useSituationStore';
 import { tokens } from '../theme/tokens';
 import TopBar from '../components/common/TopBar';
 
 export default function SituationResultPage() {
+  const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { currentSituation } = useSituationStore();
 
-  if (!currentSituation) return null;
+  useEffect(() => {
+    // If there is no situation loaded or the URL ID doesn't match the current store state, redirect.
+    if (!currentSituation || currentSituation.id !== id) {
+      navigate('/', { replace: true });
+    }
+  }, [currentSituation, id, navigate]);
+
+  if (!currentSituation || currentSituation.id !== id) return null;
 
   return (
     <div
