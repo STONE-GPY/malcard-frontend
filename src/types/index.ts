@@ -170,3 +170,41 @@ export type AnalysisStep = 'upload' | 'phoneme' | 'intonation' | 'feedback';
 export interface ApiErrorBody {
   error: { code: string; message: string; details?: unknown };
 }
+
+// --- New Types for Situation-Based Learning ---
+
+export interface Character {
+  id: string;
+  name: string;
+  avatar: string;
+}
+
+export interface DialogueLine {
+  character: string;     // references Character.id
+  text: string;
+  isTarget?: boolean;
+}
+
+export interface PuzzleSentence {
+  id: string;
+  sentence: string;         // original full sentence
+  answer: string[];         // correct order of words
+  initialWords?: string[];  // randomly shuffled words (added on client)
+  level: number;
+  audio_path?: string | null;
+}
+
+export interface Situation {
+  id: string;
+  unit?: number;
+  unit_title?: string;
+  title: string;
+  icon: string;
+  location: string;
+  level: number;
+  grade?: string;
+  difficulty?: 'easy' | 'medium' | 'hard';
+  characters: Character[];
+  dialogue: DialogueLine[];
+  puzzles: PuzzleSentence[];
+}

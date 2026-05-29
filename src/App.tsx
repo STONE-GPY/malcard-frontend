@@ -8,6 +8,11 @@ import ProfilePage from './pages/ProfilePage';
 import DailyCompletePage from './pages/DailyCompletePage';
 import MockDevPanel from './components/common/MockDevPanel';
 
+import SituationStep1Page from './pages/SituationStep1Page';
+import SituationStep2Page from './pages/SituationStep2Page';
+import SituationStep3Page from './pages/SituationStep3Page';
+import SituationResultPage from './pages/SituationResultPage';
+
 export default function App() {
   return (
     <BrowserRouter>
@@ -19,6 +24,11 @@ export default function App() {
         <Route path="/history" element={<HistoryPage />} />
         <Route path="/profile" element={<ProfilePage />} />
         <Route path="/daily-complete" element={<DailyCompletePage />} />
+
+        <Route path="/situations/:id/step1" element={<SituationStep1Page />} />
+        <Route path="/situations/:id/step2" element={<SituationStep2Page />} />
+        <Route path="/situations/:id/step3" element={<SituationStep3Page />} />
+        <Route path="/situations/:id/result" element={<SituationResultPage />} />
       </Routes>
       {/* Floating dev panel — runtime mock toggle + scenario picker.
           Off by default. Enable for a session by setting
