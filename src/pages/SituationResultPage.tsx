@@ -1,22 +1,26 @@
 import { useEffect } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useSituationStore } from '../stores/useSituationStore';
 import { tokens } from '../theme/tokens';
 import TopBar from '../components/common/TopBar';
+import { getSituationTitle } from '../i18n/situationText';
 
 export default function SituationResultPage() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t, i18n } = useTranslation();
   const { currentSituation } = useSituationStore();
 
   useEffect(() => {
-    // If there is no situation loaded or the URL ID doesn't match the current store state, redirect.
     if (!currentSituation || currentSituation.id !== id) {
       navigate('/', { replace: true });
     }
   }, [currentSituation, id, navigate]);
 
   if (!currentSituation || currentSituation.id !== id) return null;
+
+  const title = getSituationTitle(currentSituation, i18n.language);
 
   return (
     <div
@@ -27,17 +31,17 @@ export default function SituationResultPage() {
         background: tokens.pageBg,
       }}
     >
-      <TopBar title="상황 학습 완료" onBack={() => navigate('/')} />
+      <TopBar title={t('situation.resultTitle')} onBack={() => navigate('/')} />
 
-      <div style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
-        <div style={{ fontSize: 80, marginBottom: 24 }}>🎉</div>
+      <div data-testid="situation-result" style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center', justifyContent: 'center' }}>
+        <div style={{ fontSize: 80, marginBottom: 24 }}>&#10024;</div>
 
         <h1 style={{ fontSize: 24, fontWeight: 'bold', color: '#0F172A', marginBottom: 12, textAlign: 'center' }}>
-          수고하셨습니다!<br/>'{currentSituation.title}' 상황을<br/>완벽하게 마스터했어요.
+          {t('situation.resultHeading', { title })}
         </h1>
 
         <p style={{ color: '#64748B', textAlign: 'center', marginBottom: 48 }}>
-          총 {currentSituation.puzzles.length}개의 문장을 학습했습니다.
+          {t('situation.resultSummary', { count: currentSituation.puzzles.length })}
         </p>
 
         <button
@@ -55,7 +59,7 @@ export default function SituationResultPage() {
             cursor: 'pointer',
           }}
         >
-          다른 상황 학습하기
+          {t('situation.otherSituations')}
         </button>
       </div>
     </div>

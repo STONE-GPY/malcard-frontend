@@ -192,3 +192,82 @@ export async function mockBackend(
 export async function clickCardByText(page: Page, koText: string) {
   await page.locator('[data-testid="card-row"]').filter({ hasText: koText }).first().click();
 }
+
+// Seed `autoplay: false` into the persisted history store before React
+// hydrates. Without this, opening /learn auto-fires SpeechSynthesis and the
+// "예문 듣기" button's aria-label flips to "정지", colliding with the mic-stop
+// button (also "정지") under strict-mode locators. Only surfaces on hosts with
+// a real TTS voice set (e.g. Windows chromium).
+//
+// addInitScript runs on every new document, so we guard on key presence to
+// avoid wiping goal/history/language state set DURING the test on each
+// subsequent goto().
+export async function seedAutoplayFalse(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    try {
+      if (!window.localStorage.getItem('malcard-history')) {
+        window.localStorage.setItem(
+          'malcard-history',
+          JSON.stringify({
+            state: {
+              history: {},
+              favorites: [],
+              goal: { type: 'cardCount', target: 5 },
+              lastSeenGoalDate: null,
+              autoplay: false,
+            },
+            version: 2,
+          }),
+        );
+      }
+    } catch {
+      /* private-mode browser; ignore */
+    }
+  });
+}
+
+// Stand-in for the Web Speech API used by SituationStep3Page. The real engine
+// is unavailable in headless chromium. Our mock immediately calls onresult
+// with the visible target sentence so the "Check pronunciation" assertion can
+// succeed deterministically.
+export async function mockSpeechRecognition(page: Page): Promise<void> {
+  await page.addInitScript(() => {
+    class MockSpeechRecognition {
+      continuous = false;
+      interimResults = true;
+      lang = 'ko-KR';
+      onstart?: () => void;
+      onresult?: (event: unknown) => void;
+      onend?: () => void;
+      onerror?: (event: unknown) => void;
+
+      start() {
+        this.onstart?.();
+        const transcript = document
+          .querySelector('[data-testid="situation-target-sentence"]')
+          ?.textContent ?? '';
+        setTimeout(() => {
+          this.onresult?.({ resultIndex: 0, results: [[{ transcript }]] });
+          this.onend?.();
+        }, 20);
+      }
+
+      stop() {
+        this.onend?.();
+      }
+
+      abort() {
+        this.onend?.();
+      }
+    }
+
+    Object.defineProperty(window, 'SpeechRecognition', {
+      configurable: true,
+      value: MockSpeechRecognition,
+    });
+    Object.defineProperty(window, 'webkitSpeechRecognition', {
+      configurable: true,
+      value: MockSpeechRecognition,
+    });
+  });
+}

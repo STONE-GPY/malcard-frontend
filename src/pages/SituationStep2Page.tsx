@@ -1,12 +1,15 @@
-import { useEffect } from 'react';
+import { useEffect, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
+import { useTranslation } from 'react-i18next';
 import { useSituationStore } from '../stores/useSituationStore';
 import { tokens } from '../theme/tokens';
 import TopBar from '../components/common/TopBar';
+import { cancelSpeech, playReference } from '../lib/speech';
 
 export default function SituationStep2Page() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
+  const { t } = useTranslation();
   const {
     currentSituation,
     currentPuzzleIndex,
@@ -17,6 +20,11 @@ export default function SituationStep2Page() {
     removeWord,
     checkPuzzleAnswer,
   } = useSituationStore();
+
+  // True once the puzzle is solved correctly — drives the success animation
+  // and the reference-audio playback before advancing to STEP 3.
+  const [solved, setSolved] = useState(false);
+  const advancingRef = useRef(false);
 
   useEffect(() => {
     if (!currentSituation || currentSituation.id !== id) {
@@ -29,18 +37,39 @@ export default function SituationStep2Page() {
     }
   }, [currentSituation, id, navigate, slots.length, initPuzzle]);
 
+  // Reset the solved flag whenever a new puzzle is initialised (slots reset to
+  // all-empty) so the success state doesn't leak across puzzles, and stop any
+  // lingering audio when leaving the screen.
+  useEffect(() => {
+    advancingRef.current = false;
+    setSolved(false);
+    return () => cancelSpeech();
+  }, [currentPuzzleIndex]);
+
   if (!currentSituation || slots.length === 0) return null;
 
   const puzzle = currentSituation.puzzles[currentPuzzleIndex];
   if (!puzzle) return null;
 
+  // 기획서 3-2: 정답 완성 시 애니메이션 + 정답 문장 자동 음성 재생 →
+  // 따라 말하기(STEP3) 진입. 모범 응답 오디오(audio_path)가 있으면 그것을,
+  // 없으면 TTS로 정답 문장을 들려준 뒤 STEP3로 넘어간다.
   const handleCheck = () => {
     const isPerfect = checkPuzzleAnswer();
-    if (isPerfect) {
-      setTimeout(() => {
-        navigate(`/situations/${currentSituation.id}/step3`);
-      }, 500);
-    }
+    if (!isPerfect || advancingRef.current) return;
+    advancingRef.current = true;
+    setSolved(true);
+
+    let navigated = false;
+    const advance = () => {
+      if (navigated) return;
+      navigated = true;
+      navigate(`/situations/${currentSituation.id}/step3`);
+    };
+    playReference(puzzle.sentence, puzzle.audio_path, { onend: advance });
+    // 재생이 끝나면 바로 진입하되, onend를 보장하지 않는 음성 엔진을 위해
+    // 상한 타이머로 진입을 보강한다(짧은 문장 청취 후 자연스럽게 전환).
+    window.setTimeout(advance, 2500);
   };
 
   const allSlotsFilled = slots.every((s) => s !== null);
@@ -55,16 +84,20 @@ export default function SituationStep2Page() {
       }}
     >
       <TopBar
-        title={`문장 만들기 (${currentPuzzleIndex + 1}/${currentSituation.puzzles.length})`}
+        title={t('situation.makeSentenceTitle', {
+          current: currentPuzzleIndex + 1,
+          total: currentSituation.puzzles.length,
+        })}
         onBack={() => navigate(`/situations/${currentSituation.id}/step1`)}
       />
 
       <div style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column' }}>
         <div style={{ marginBottom: 32, fontSize: 16, color: '#475569', textAlign: 'center' }}>
-          단어 카드를 순서대로 눌러<br/>문장을 완성해보세요.
+          {t('situation.makeSentencePrompt1')}<br />{t('situation.makeSentencePrompt2')}
         </div>
 
         <div
+          data-testid="situation-slots"
           style={{
             display: 'flex',
             flexWrap: 'wrap',
@@ -81,6 +114,7 @@ export default function SituationStep2Page() {
           {slots.map((slot, i) => (
             <div
               key={i}
+              data-testid="situation-slot"
               onClick={() => {
                 if (slot) removeWord(i);
               }}
@@ -114,6 +148,8 @@ export default function SituationStep2Page() {
               return (
                 <button
                   key={idx}
+                  data-testid="situation-word"
+                  data-word={word}
                   disabled={isUsed}
                   onClick={() => placeWord(idx, word)}
                   style={{
@@ -137,23 +173,44 @@ export default function SituationStep2Page() {
           </div>
         </div>
 
+        {solved && (
+          <div
+            data-testid="situation-puzzle-success"
+            style={{
+              marginBottom: 12,
+              padding: '12px 16px',
+              background: '#ECFDF5',
+              border: '1px solid #6EE7B7',
+              borderRadius: tokens.radiusMd,
+              color: '#047857',
+              fontSize: 15,
+              fontWeight: 'bold',
+              textAlign: 'center',
+              animation: 'mc-fade-up 0.3s both',
+            }}
+          >
+            {t('situation.puzzleSuccess')}
+          </div>
+        )}
+
         <button
-          disabled={!allSlotsFilled}
+          data-testid="situation-check-puzzle"
+          disabled={!allSlotsFilled || solved}
           onClick={handleCheck}
           style={{
             width: '100%',
             padding: 16,
-            background: allSlotsFilled ? tokens.primaryGradFlat : '#E2E8F0',
-            color: allSlotsFilled ? '#FFFFFF' : '#94A3B8',
+            background: allSlotsFilled && !solved ? tokens.primaryGradFlat : '#E2E8F0',
+            color: allSlotsFilled && !solved ? '#FFFFFF' : '#94A3B8',
             border: 'none',
             borderRadius: tokens.radiusMd,
             fontSize: 16,
             fontWeight: 'bold',
-            cursor: allSlotsFilled ? 'pointer' : 'not-allowed',
-            boxShadow: allSlotsFilled ? `0 4px 12px ${tokens.primaryShadow}` : 'none',
+            cursor: allSlotsFilled && !solved ? 'pointer' : 'not-allowed',
+            boxShadow: allSlotsFilled && !solved ? `0 4px 12px ${tokens.primaryShadow}` : 'none',
           }}
         >
-          확인하기
+          {t('situation.check')}
         </button>
       </div>
     </div>

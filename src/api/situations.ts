@@ -1,4 +1,4 @@
-import { situations } from '../data/situations';
+import { getSituationById, loadSituations } from '../data/situations';
 import type { Situation } from '../types';
 
 export interface SituationsListResponse {
@@ -7,15 +7,12 @@ export interface SituationsListResponse {
 }
 
 export async function listSituations(): Promise<SituationsListResponse> {
-  // In a real app this might fetch from an endpoint. Here we return the mock data directly since the frontend manages the lists now.
-  return {
-    items: situations,
-    total: situations.length,
-  };
+  const items = await loadSituations();
+  return { items, total: items.length };
 }
 
 export async function getSituation(id: string): Promise<Situation> {
-  const found = situations.find((s) => s.id === id);
+  const found = await getSituationById(id);
   if (!found) {
     throw new Error('SITUATION_NOT_FOUND');
   }

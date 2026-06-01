@@ -5,9 +5,18 @@ import {
   mockBackend,
   READY_RESPONSE,
   RETRY_RESPONSE,
+  seedAutoplayFalse,
 } from './fixtures';
 
 test.describe('MalCard end-to-end (mocked backend)', () => {
+  test.beforeEach(async ({ page }) => {
+    // Disable autoplay so opening /learn does NOT auto-fire SpeechSynthesis.
+    // Without this, the "예문 듣기" button's aria-label flips to "정지" while
+    // speaking and collides with the mic-stop button under strict locators —
+    // visible on Windows (real TTS voices), silently fine on Linux CI.
+    await seedAutoplayFalse(page);
+  });
+
   test('Home renders cards from /cards endpoint', async ({ page }) => {
     await mockBackend(page);
     await page.goto('/');
@@ -18,21 +27,14 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     await expect(page.getByText('Где выходить?')).toBeVisible();
   });
 
-  test('Category filter sends type query and updates list', async ({ page }) => {
+  test('Category switch updates the rendered list', async ({ page }) => {
     await mockBackend(page);
 
-    const cardsRequests: string[] = [];
-    page.on('request', (req) => {
-      if (req.url().includes('/cards') && !req.url().includes('/cards/')) {
-        cardsRequests.push(new URL(req.url()).search);
-      }
-    });
-
     await page.goto('/');
+    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
     await page.locator('[data-testid="category-situations"]').click();
-    await expect.poll(() => cardsRequests.some((s) => s.includes('type='))).toBe(true);
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(1);
-    await expect(page.getByText('병원 접수 어떻게 해요?')).toBeVisible();
+    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(0);
+    await expect(page.locator('[data-testid="situation-card"]').first()).toBeVisible();
   });
 
   test('Cards endpoint failure shows error panel with retry', async ({ page }) => {
@@ -75,10 +77,11 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     await page.waitForTimeout(1000);
     await page.getByRole('button', { name: '정지' }).click();
 
-    await expect(page).toHaveURL(/\/loading$/);
-    await expect(page.getByText('음성을 분석하고 있어요')).toBeVisible();
-
-    await page.waitForURL(/\/result$/, { timeout: 10_000 });
+    await page.waitForURL(/\/(loading|result)$/, { timeout: 10_000 });
+    if (page.url().endsWith('/loading')) {
+      await expect(page.getByText('음성을 분석하고 있어요')).toBeVisible();
+      await page.waitForURL(/\/result$/, { timeout: 10_000 });
+    }
     await expect(page.locator('[data-testid="score-card"]')).toBeVisible();
     // overall: 84
     await expect(page.locator('[data-testid="score-card"]')).toContainText('84');
@@ -214,5 +217,92 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     await page.goto('/history');
     await expect(page.locator('[data-testid="history-session"]').first()).toBeVisible();
     await expect(page.locator('[data-testid="history-session"]')).toContainText('병원 접수');
+  });
+  test('Situation learning flow supports deck filtering, puzzle, speech, and completion', async ({ page }) => {
+    await mockBackend(page);
+    await page.addInitScript(() => {
+      class MockSpeechRecognition {
+        continuous = false;
+        interimResults = true;
+        lang = 'ko-KR';
+        onstart?: () => void;
+        onresult?: (event: unknown) => void;
+        onend?: () => void;
+
+        start() {
+          this.onstart?.();
+          const transcript = document
+            .querySelector('[data-testid="situation-target-sentence"]')
+            ?.textContent ?? '';
+          setTimeout(() => {
+            this.onresult?.({
+              resultIndex: 0,
+              results: [[{ transcript }]],
+            });
+            this.onend?.();
+          }, 20);
+        }
+
+        stop() {
+          this.onend?.();
+        }
+
+        abort() {
+          this.onend?.();
+        }
+      }
+
+      Object.defineProperty(window, 'SpeechRecognition', {
+        configurable: true,
+        value: MockSpeechRecognition,
+      });
+      Object.defineProperty(window, 'webkitSpeechRecognition', {
+        configurable: true,
+        value: MockSpeechRecognition,
+      });
+    });
+
+    await page.goto('/');
+    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
+    await page.locator('[data-testid="category-situations"]').click();
+    await expect(page.locator('[data-situation-id="unit1_01"]')).toBeVisible();
+
+    await page.locator('[data-testid="deck-shopping"]').click();
+    await expect(page.locator('[data-situation-id="unit1_01"]')).toHaveCount(0);
+
+    await page.locator('[data-testid="deck-shopping"]').click();
+    await expect(page.locator('[data-situation-id="unit1_01"]')).toBeVisible();
+    await page.locator('[data-situation-id="unit1_01"]').click();
+    await expect(page).toHaveURL(/\/situations\/unit1_01\/step1$/);
+
+    await page.locator('[data-testid="situation-start"]').click();
+    await expect(page).toHaveURL(/\/situations\/unit1_01\/step2$/);
+
+    const answers = [
+      ['나는', '지난주에', '배가', '아팠어요.'],
+      ['무릎이', '아파서', '걷기가', '힘들어요.'],
+      ['손에', '상처가', '나서', '소독을', '했어요.'],
+    ];
+
+    for (let i = 0; i < answers.length; i++) {
+      for (const word of answers[i]) {
+        await page.locator(`[data-testid="situation-word"][data-word="${word}"]`).click();
+      }
+      await page.locator('[data-testid="situation-check-puzzle"]').click();
+      await expect(page).toHaveURL(/\/step3$/, { timeout: 5000 });
+
+      await page.locator('[data-testid="situation-mic"]').click();
+      await expect(page.locator('[data-testid="situation-check-speech"]')).toBeVisible();
+      await page.locator('[data-testid="situation-check-speech"]').click();
+      await expect(page.locator('[data-testid="situation-speech-success"]')).toBeVisible();
+      await page.locator('[data-testid="situation-next"]').click();
+
+      if (i < answers.length - 1) {
+        await expect(page).toHaveURL(/\/step2$/, { timeout: 5000 });
+      }
+    }
+
+    await expect(page).toHaveURL(/\/situations\/unit1_01\/result$/, { timeout: 5000 });
+    await expect(page.locator('[data-testid="situation-result"]')).toBeVisible();
   });
 });

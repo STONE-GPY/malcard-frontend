@@ -1,15 +1,8 @@
-// Floating in-app developer panel for mock-mode testing. Lets the user:
-//   • Toggle between mock and the real backend at runtime (no .env edits)
-//   • Pick a scenario the mock analyzer should return on the next analyze()
-//
-// Renders as a small badge in the bottom-right corner inside #root. Click to
-// expand the panel; selections persist to localStorage so a page reload keeps
-// the chosen mode/scenario. Always rendered — when the env file says
-// VITE_USE_MOCK_API=false (real backend default) the panel still lets the
-// developer flip to mock without touching the file system.
+// Floating in-app developer panel for mock-mode testing.
 
 import { useEffect, useState } from 'react';
-import { USE_MOCK_API, useMockApi, setMockApiOverride } from '../../api/client';
+import { useTranslation } from 'react-i18next';
+import { USE_MOCK_API, useMockApi as readMockApi, setMockApiOverride } from '../../api/client';
 import {
   SCENARIOS,
   getActiveScenario,
@@ -19,15 +12,14 @@ import {
 import { tokens } from '../../theme/tokens';
 
 export default function MockDevPanel() {
+  const { t } = useTranslation();
   const [open, setOpen] = useState(false);
-  const [mockOn, setMockOn] = useState(() => useMockApi());
+  const [mockOn, setMockOn] = useState(() => readMockApi());
   const [scenario, setScenario] = useState<ScenarioId>(() => getActiveScenario());
 
-  // Re-read from storage when the panel opens so a tab opened in another window
-  // doesn't show stale values.
   useEffect(() => {
     if (!open) return;
-    setMockOn(useMockApi());
+    setMockOn(readMockApi());
     setScenario(getActiveScenario());
   }, [open]);
 
@@ -43,13 +35,12 @@ export default function MockDevPanel() {
 
   const activeMeta = SCENARIOS.find((s) => s.id === scenario) ?? SCENARIOS[0];
 
-  // Collapsed badge
   if (!open) {
     return (
       <button
         type="button"
         onClick={() => setOpen(true)}
-        aria-label="개발자 패널 열기"
+        aria-label={t('devPanel.open')}
         style={{
           position: 'absolute',
           right: 10,
@@ -72,7 +63,7 @@ export default function MockDevPanel() {
           gap: 6,
         }}
       >
-        <span>{mockOn ? '🧪 MOCK' : '🌐 REAL'}</span>
+        <span>{mockOn ? t('devPanel.mockBadge') : t('devPanel.realBadge')}</span>
         {mockOn && (
           <span style={{ fontSize: 10, opacity: 0.85, fontWeight: 600 }}>
             {activeMeta.label.split(' ')[0]}
@@ -105,12 +96,12 @@ export default function MockDevPanel() {
     >
       <div style={{ display: 'flex', alignItems: 'center', justifyContent: 'space-between' }}>
         <div style={{ fontWeight: 700, fontSize: 13, letterSpacing: -0.2 }}>
-          개발자 패널
+          {t('devPanel.title')}
         </div>
         <button
           type="button"
           onClick={() => setOpen(false)}
-          aria-label="닫기"
+          aria-label={t('devPanel.close')}
           style={{
             width: 24,
             height: 24,
@@ -140,7 +131,7 @@ export default function MockDevPanel() {
         }}
       >
         <span style={{ fontWeight: 600, fontSize: 12 }}>
-          {mockOn ? '🧪 Mock 모드' : '🌐 Real 백엔드'}
+          {mockOn ? t('devPanel.mockMode') : t('devPanel.realBackend')}
         </span>
         <input
           type="checkbox"
@@ -162,7 +153,7 @@ export default function MockDevPanel() {
               marginTop: 2,
             }}
           >
-            시나리오 (다음 분석부터 적용)
+            {t('devPanel.scenarioLabel')}
           </div>
           <div
             style={{
@@ -215,7 +206,7 @@ export default function MockDevPanel() {
           lineHeight: 1.4,
         }}
       >
-        설정은 브라우저 localStorage에 저장돼요. .env: <code>VITE_USE_MOCK_API={String(USE_MOCK_API)}</code>
+        {t('devPanel.storageHint')} <code>VITE_USE_MOCK_API={String(USE_MOCK_API)}</code>
       </div>
     </div>
   );
