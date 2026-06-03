@@ -1,7 +1,9 @@
 import { useMemo, useState, type ReactNode } from 'react';
 import { useTranslation } from 'react-i18next';
+import { useNavigate } from 'react-router-dom';
 import { useHistoryStore, type DailyGoalType } from '../stores/useHistoryStore';
 import BottomNav from '../components/common/BottomNav';
+import { isLocalhost } from '../lib/adminEnv';
 import { tokens } from '../theme/tokens';
 import {
   achievementStates,
@@ -15,6 +17,7 @@ const APP_VERSION = '1.0.0-mvp';
 
 export default function ProfilePage() {
   const { t, i18n: i18nInst } = useTranslation();
+  const navigate = useNavigate();
   const history = useHistoryStore((s) => s.history);
   const goal = useHistoryStore((s) => s.goal);
   const setGoal = useHistoryStore((s) => s.setGoal);
@@ -413,6 +416,20 @@ export default function ProfilePage() {
           trailing={<TriangleArrow />}
         />
       </SettingsGroup>
+
+      {/* Local-only authoring entry. Hidden on any non-localhost origin so a
+          deployed build never surfaces it (the route itself also guards). */}
+      {isLocalhost() && (
+        <SettingsGroup>
+          <SettingRow
+            icon="🛠️"
+            label="카드 관리"
+            sub="발음·상황 카드 추가 (개발자)"
+            onClick={() => navigate('/admin')}
+            trailing={<TriangleArrow />}
+          />
+        </SettingsGroup>
+      )}
 
         <div
           style={{

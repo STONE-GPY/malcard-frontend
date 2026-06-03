@@ -1,4 +1,4 @@
-import { useEffect, useMemo, useState } from 'react';
+import { useEffect, useMemo, useRef, useState } from 'react';
 import { loadSituations } from '../data/situations';
 import type { Situation } from '../types';
 import { useNavigate } from 'react-router-dom';
@@ -34,6 +34,20 @@ export default function CardSelectPage() {
   const [selectedDifficulty, setSelectedDifficulty] =
     useState<'all' | 'easy' | 'medium' | 'hard'>('all');
 
+  // 상황 회화는 발음 카드와 완전히 다른 워크플로우(퍼즐 + 음성인식 멀티스텝)다.
+  // 같은 카테고리 필터 칩으로 섞으면 같은 종류의 콘텐츠처럼 보이므로, 상단
+  // 모드 토글로 분리한다. selectedCategory === 'situations'를 상황 모드로
+  // 간주하고, 발음 모드로 돌아올 때 직전에 보던 카테고리를 복원한다.
+  const mode: 'pronunciation' | 'situation' =
+    selectedCategory === 'situations' ? 'situation' : 'pronunciation';
+  const lastPronCategoryRef = useRef<CategoryId>('all');
+  useEffect(() => {
+    if (selectedCategory !== 'situations') lastPronCategoryRef.current = selectedCategory;
+  }, [selectedCategory]);
+  const setMode = (next: 'pronunciation' | 'situation') => {
+    setCategory(next === 'situation' ? 'situations' : lastPronCategoryRef.current);
+  };
+
   // Situations come from a lazy-loaded JSON chunk; only the situations
   // category renders them, so we defer the load until the user lands on
   // that tab to avoid shipping ~200KB on the home view.
@@ -58,8 +72,8 @@ export default function CardSelectPage() {
     setSelectedDifficulty('all');
   }, [selectedCategory]);
 
-  // Decks are only meaningful inside the situations category.
-  const showDecks = selectedCategory === 'situations';
+  // Decks are only meaningful inside the situation mode.
+  const showDecks = mode === 'situation';
 
   // Apply deck keyword filter on top of the category filter when a deck is
   // selected. The full-resolution card list (decks visible) ignores the deck
@@ -189,43 +203,92 @@ export default function CardSelectPage() {
         )}
       </div>
 
+      {/* Mode toggle: 발음 연습 ↔ 상황 회화. These are two distinct learning
+          flows (phoneme record+analyze vs. situational puzzle+speech), so they
+          are split at the top instead of being mixed into the category chips. */}
       <div
+        data-testid="mode-toggle"
         style={{
           display: 'flex',
-          gap: 8,
-          overflowX: 'auto',
-          padding: `6px ${tokens.pad}px 14px`,
-          scrollbarWidth: 'none',
+          gap: 4,
+          margin: `0 ${tokens.pad}px 14px`,
+          padding: 4,
+          background: '#EEF0F4',
+          borderRadius: 999,
         }}
       >
-        {categories.map((cat) => {
-          const active = selectedCategory === cat.id;
+        {(['pronunciation', 'situation'] as const).map((m) => {
+          const active = mode === m;
           return (
             <button
-              key={cat.id}
-              onClick={() => setCategory(cat.id as CategoryId)}
-              data-testid={`category-${cat.id}`}
+              key={m}
+              data-testid={`mode-${m}`}
+              onClick={() => setMode(m)}
+              aria-pressed={active}
               style={{
-                flexShrink: 0,
-                padding: '10px 18px',
+                flex: 1,
+                padding: '10px 0',
                 borderRadius: 999,
-                border: active ? 'none' : '1px solid #E2E8F0',
-                background: active ? tokens.primaryGradFlat : '#FFFFFF',
-                color: active ? '#FFFFFF' : tokens.chipText,
-                fontWeight: active ? 600 : 500,
+                border: 'none',
+                background: active ? '#FFFFFF' : 'transparent',
+                color: active ? tokens.primary : '#64748B',
+                fontWeight: active ? 700 : 600,
                 fontSize: 14,
                 letterSpacing: -0.1,
-                boxShadow: active
-                  ? `0 6px 16px -4px ${tokens.primaryShadow}`
-                  : '0 1px 2px rgba(15,23,42,0.04)',
-                whiteSpace: 'nowrap',
+                cursor: 'pointer',
+                boxShadow: active ? '0 2px 8px -2px rgba(15,23,42,0.12)' : 'none',
+                transition: 'background 0.15s ease, color 0.15s ease',
               }}
             >
-              {t(cat.labelKey)}
+              {t(`mode.${m}`)}
             </button>
           );
         })}
       </div>
+
+      {/* Category chips only filter pronunciation cards; the situation flow is
+          driven by the mode toggle + decks below, not these chips. */}
+      {mode === 'pronunciation' && (
+        <div
+          style={{
+            display: 'flex',
+            gap: 8,
+            overflowX: 'auto',
+            padding: `6px ${tokens.pad}px 14px`,
+            scrollbarWidth: 'none',
+          }}
+        >
+          {categories
+            .filter((cat) => cat.id !== 'situations')
+            .map((cat) => {
+              const active = selectedCategory === cat.id;
+              return (
+                <button
+                  key={cat.id}
+                  onClick={() => setCategory(cat.id as CategoryId)}
+                  data-testid={`category-${cat.id}`}
+                  style={{
+                    flexShrink: 0,
+                    padding: '10px 18px',
+                    borderRadius: 999,
+                    border: active ? 'none' : '1px solid #E2E8F0',
+                    background: active ? tokens.primaryGradFlat : '#FFFFFF',
+                    color: active ? '#FFFFFF' : tokens.chipText,
+                    fontWeight: active ? 600 : 500,
+                    fontSize: 14,
+                    letterSpacing: -0.1,
+                    boxShadow: active
+                      ? `0 6px 16px -4px ${tokens.primaryShadow}`
+                      : '0 1px 2px rgba(15,23,42,0.04)',
+                    whiteSpace: 'nowrap',
+                  }}
+                >
+                  {t(cat.labelKey)}
+                </button>
+              );
+            })}
+        </div>
+      )}
 
       {showDecks && (
         <div

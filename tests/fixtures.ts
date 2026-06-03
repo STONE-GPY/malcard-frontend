@@ -50,16 +50,23 @@ export interface FullAnalysisResponse {
     };
     prosody_input?: unknown;
   };
-  prosody_result: Array<{
-    syllable_idx: number;
-    syllable_label: string;
-    native_start: number;
-    learner_start: number;
-    rmse: number;
-    pearson: number;
-    slope_diff: number;
-    duration_ratio: number;
-  }>;
+  prosody_result: {
+    reference_text?: string;
+    records?: Array<{
+      eojeol_idx: number;
+      rule_label: string;
+      severity: 'minor' | 'major';
+      feedback_text: string;
+      evidence_metrics?: { eojeol_label?: string };
+    }>;
+    summary_when_no_outlier?: string | null;
+    prosody_plot?: {
+      native_f0_zscore: number[];
+      learner_f0_zscore: number[];
+      learner_time_at_step: number[];
+      eojeol_boundaries: Array<{ path_step: number; label: string | null }>;
+    };
+  };
   pipeline_state: { prosody_executed: boolean; reason: string };
 }
 
@@ -86,17 +93,31 @@ export const READY_RESPONSE: FullAnalysisResponse = {
       ],
     },
   },
-  prosody_result: [
-    { syllable_idx: 0, syllable_label: '병', native_start: 0.01, learner_start: 0.03, rmse: 0.42, pearson: 0.76, slope_diff: -0.05, duration_ratio: 1.02 },
-    { syllable_idx: 1, syllable_label: '원', native_start: 0.18, learner_start: 0.20, rmse: 0.38, pearson: 0.80, slope_diff: -0.02, duration_ratio: 1.00 },
-    { syllable_idx: 2, syllable_label: '접', native_start: 0.36, learner_start: 0.39, rmse: 0.41, pearson: 0.74, slope_diff: 0.01, duration_ratio: 1.04 },
-    { syllable_idx: 3, syllable_label: '수', native_start: 0.54, learner_start: 0.58, rmse: 0.45, pearson: 0.70, slope_diff: -0.03, duration_ratio: 1.06 },
-    { syllable_idx: 4, syllable_label: '어', native_start: 0.72, learner_start: 0.78, rmse: 0.65, pearson: 0.55, slope_diff: -0.10, duration_ratio: 1.05 },
-    { syllable_idx: 5, syllable_label: '떻', native_start: 0.92, learner_start: 0.99, rmse: 0.42, pearson: 0.72, slope_diff: -0.10, duration_ratio: 1.05 },
-    { syllable_idx: 6, syllable_label: '게', native_start: 1.10, learner_start: 1.18, rmse: 0.65, pearson: 0.55, slope_diff: -0.20, duration_ratio: 1.18 },
-    { syllable_idx: 7, syllable_label: '해', native_start: 1.30, learner_start: 1.38, rmse: 0.45, pearson: 0.70, slope_diff: -0.05, duration_ratio: 1.05 },
-    { syllable_idx: 8, syllable_label: '요', native_start: 1.50, learner_start: 1.58, rmse: 0.50, pearson: 0.62, slope_diff: -0.18, duration_ratio: 1.10 },
-  ],
+  prosody_result: {
+    reference_text: '병원 접수 어떻게 해요?',
+    records: [
+      {
+        eojeol_idx: 1,
+        rule_label: 'pitch_offset',
+        severity: 'minor',
+        feedback_text: "'접수' 어절 전체 음높이가 조금 높아요. 조금만 낮게 말해봐요.",
+        evidence_metrics: { eojeol_label: '접수' },
+      },
+    ],
+    summary_when_no_outlier: null,
+    prosody_plot: {
+      native_f0_zscore: [1.2, 1.0, 0.8, 0.5, 0.3, 0.1, -0.1, -0.3, -0.5, -0.7, -0.9, -1.1],
+      learner_f0_zscore: [1.1, 1.0, 0.9, 0.8, 0.7, 0.5, 0.2, 0.0, -0.2, -0.5, -0.8, -1.0],
+      learner_time_at_step: [0, 0.12, 0.24, 0.36, 0.48, 0.6, 0.72, 0.84, 0.96, 1.08, 1.2, 1.32],
+      eojeol_boundaries: [
+        { path_step: 0, label: '병원' },
+        { path_step: 3, label: '접수' },
+        { path_step: 6, label: '어떻게' },
+        { path_step: 9, label: '해요' },
+        { path_step: 11, label: null },
+      ],
+    },
+  },
   pipeline_state: { prosody_executed: true, reason: 'ready' },
 };
 
@@ -105,7 +126,7 @@ export const RETRY_RESPONSE: FullAnalysisResponse = {
     status: { evaluation_status: 'retry', status_message: 'low confidence' },
     llm_feedback_input: { reference_text: '병원 접수 어떻게 해요?', issues: [] },
   },
-  prosody_result: [],
+  prosody_result: {},
   pipeline_state: { prosody_executed: false, reason: 'retry' },
 };
 
@@ -114,7 +135,7 @@ export const DISCARDED_RESPONSE: FullAnalysisResponse = {
     status: { evaluation_status: 'discarded', status_message: 'too noisy' },
     llm_feedback_input: { reference_text: '병원 접수 어떻게 해요?', issues: [] },
   },
-  prosody_result: [],
+  prosody_result: {},
   pipeline_state: { prosody_executed: false, reason: 'discarded' },
 };
 

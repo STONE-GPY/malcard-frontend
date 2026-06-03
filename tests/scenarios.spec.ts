@@ -61,18 +61,13 @@ test.describe('MalCard scenarios — additional flows (PR3)', () => {
 
   // ───────────────────────── Card selection ─────────────────────────
 
-  test('Empty cards endpoint renders the empty-cards message', async ({ page }) => {
-    await mockBackend(page, { cards: [] });
-    await page.goto('/');
-    await expect(page.locator('[data-testid="empty-cards"]')).toBeVisible();
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(0);
-  });
-
   test('Situations category swaps card-rows for situation-cards', async ({ page }) => {
     await mockBackend(page);
     await page.goto('/');
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
-    await page.locator('[data-testid="category-situations"]').click();
+    // Phoneme practice cards come from local static data (backend /cards serves
+    // situations now), so the home list renders the full local set.
+    await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
+    await page.locator('[data-testid="mode-situation"]').click();
     await expect(page.locator('[data-testid="card-row"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="situation-card"]').first()).toBeVisible();
   });
@@ -80,7 +75,7 @@ test.describe('MalCard scenarios — additional flows (PR3)', () => {
   test('Deck chip toggling filters and clears the situation list', async ({ page }) => {
     await mockBackend(page);
     await page.goto('/');
-    await page.locator('[data-testid="category-situations"]').click();
+    await page.locator('[data-testid="mode-situation"]').click();
     // Wait for the first situation card before counting; the dataset is
     // dynamically imported and the count would otherwise sample [] on first
     // render.
@@ -102,14 +97,19 @@ test.describe('MalCard scenarios — additional flows (PR3)', () => {
     await expect(page.locator('[data-testid="situation-card"]')).toHaveCount(situationsBefore);
   });
 
-  test('Switching back from situations to daily restores card-rows', async ({ page }) => {
+  test('Switching back from situations to pronunciation restores card-rows', async ({ page }) => {
     await mockBackend(page);
     await page.goto('/');
-    await page.locator('[data-testid="category-situations"]').click();
+    await page.locator('[data-testid="mode-situation"]').click();
     await expect(page.locator('[data-testid="situation-card"]').first()).toBeVisible();
-    await page.locator('[data-testid="category-daily"]').click();
+    // Category chips are hidden in situation mode; switch back via the mode
+    // toggle, which restores the last pronunciation category (card-rows).
+    await page.locator('[data-testid="mode-pronunciation"]').click();
     await expect(page.locator('[data-testid="situation-card"]')).toHaveCount(0);
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(2);
+    await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
+    // Category chips are available again in pronunciation mode.
+    await page.locator('[data-testid="category-daily"]').click();
+    await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
   });
 
   // ───────────────────────── Card learn ─────────────────────────
@@ -304,13 +304,13 @@ test.describe('MalCard scenarios — additional flows (PR3)', () => {
     await mockBackend(page);
     await mockSpeechRecognition(page);
 
-    // 1. Start screen — header, hello banner, 3 legacy cards.
+    // 1. Start screen — header, hello banner, phoneme cards (local static data).
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'MalCard' })).toBeVisible();
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
+    await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
 
     // 2. Switch into the situations category and confirm unit1_01 is in view.
-    await page.locator('[data-testid="category-situations"]').click();
+    await page.locator('[data-testid="mode-situation"]').click();
     await expect(page.locator('[data-situation-id="unit1_01"]')).toBeVisible();
 
     // 3. Open the situation, land on Step 1 (dialogue) and proceed.
@@ -401,7 +401,7 @@ test.describe('MalCard scenarios — additional flows (PR3)', () => {
   test('Difficulty filter narrows the situation list and toggles back', async ({ page }) => {
     await mockBackend(page);
     await page.goto('/');
-    await page.locator('[data-testid="category-situations"]').click();
+    await page.locator('[data-testid="mode-situation"]').click();
     await expect(page.locator('[data-testid="situation-card"]').first()).toBeVisible();
     const total = await page.locator('[data-testid="situation-card"]').count();
     await expect(page.locator('[data-testid="difficulty-filter"]')).toBeVisible();

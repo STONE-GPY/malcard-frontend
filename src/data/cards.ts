@@ -313,15 +313,34 @@ export const mockResultForDemo: AnalysisResult = {
     { ko: '려', user: '/ɾjʌ/', target: '/ɾjʌ/', correct: false, note: '받침 ㄹ을 더 분명하게 발음해 주세요' },
     { ko: '요', user: '/jo/', target: '/jo/', correct: true },
   ],
-  intonation: [
-    { c: '어', native: 62, mine: 60 },
-    { c: '디', native: 70, mine: 66 },
-    { c: '서', native: 68, mine: 64 },
-    { c: '내', native: 72, mine: 70 },
-    { c: '려', native: 78, mine: 68 },
-    { c: '요', native: 92, mine: 70 },
-  ],
-  intonationWarning: '문장 끝 억양이 부족해요',
+  prosody: {
+    points: Array.from({ length: 24 }, (_, step) => {
+      const x = step / 23;
+      const base = 1 - 1.8 * x;
+      return {
+        step,
+        t: Math.round(x * 150) / 100,
+        native: Math.round(base * 100) / 100,
+        mine: Math.round((base + (x > 0.6 ? (x - 0.6) * 6 : 0)) * 100) / 100,
+      };
+    }),
+    boundaries: [
+      { step: 0, label: '어디서' },
+      { step: 12, label: '내려요' },
+    ],
+    maxStep: 23,
+    zones: [{ from: 12, to: 23, rule: 'pitch_rising_excess', severity: 'major' }],
+    records: [
+      {
+        eojeol_idx: 1,
+        rule_label: 'pitch_rising_excess',
+        severity: 'major',
+        feedback_text: "'내려요' 어절의 후반에서 음이 너무 올라갔어요. 확실히 더 평평하게 말해봐요.",
+        evidence_metrics: { eojeol_label: '내려요' },
+      },
+    ],
+    summary: null,
+  },
   aiFeedback: '전체적으로 발음이 깨끗했어요 — 받침 ㄹ을 더 또렷하게.',
   prosodyExecuted: true,
 };

@@ -8,7 +8,7 @@ import { ApiError } from '../api/client';
 import type {
   BackendFullResponse,
   BackendIssue,
-  BackendProsodyPoint,
+  BackendProsodyResult,
   Card,
   EvaluationStatus,
 } from '../types';
@@ -104,23 +104,60 @@ function makePhonemeIssues(
   });
 }
 
+// Synthesize a lens-rule v3 prosody_result (path-step z-score curves + eojeol
+// boundaries + optional records) so the dev panel exercises the new F0 chart.
+// `slopeBias` biases the learner curve; a large bias yields a pitch record.
 function makeProsody(
   syls: string[],
   options: { slopeBias?: number; pearsonBase?: number; rmseBase?: number } = {},
-): BackendProsodyPoint[] {
+): BackendProsodyResult {
+  const round = (v: number) => Math.round(v * 100) / 100;
   const slopeBias = options.slopeBias ?? 0;
-  const pearsonBase = options.pearsonBase ?? 0.85;
-  const rmseBase = options.rmseBase ?? 0.32;
-  return syls.map((c, i) => ({
-    syllable_idx: i,
-    syllable_label: c,
-    native_start: i * 0.18,
-    learner_start: i * 0.18 + (i % 2 === 0 ? 0.02 : -0.015),
-    rmse: rmseBase + (i % 3) * 0.03,
-    pearson: Math.max(-1, Math.min(1, pearsonBase - (i % 4) * 0.05)),
-    slope_diff: slopeBias + (i === syls.length - 1 ? slopeBias * 1.5 : 0) + (i % 2 ? 0.01 : -0.01),
-    duration_ratio: 0.95 + ((i * 13) % 20) / 100,
+  const n = Math.max(40, syls.length * 12);
+
+  const native: number[] = [];
+  const learner: number[] = [];
+  const times: number[] = [];
+  for (let i = 0; i < n; i++) {
+    const x = i / n;
+    const base = 1.0 - 1.8 * x + 0.35 * Math.sin(x * Math.PI * Math.max(2, syls.length));
+    native.push(round(base));
+    learner.push(round(base + slopeBias * 6 * x + 0.12 * Math.sin(x * Math.PI * 7)));
+    times.push(round(i * 0.01));
+  }
+
+  const eojeol_boundaries = syls.map((c, i) => ({
+    path_step: Math.round((i / syls.length) * n),
+    label: c as string | null,
   }));
+  eojeol_boundaries.push({ path_step: n - 1, label: null });
+
+  const records: NonNullable<BackendProsodyResult['records']> = [];
+  if (Math.abs(slopeBias) >= 0.1 && syls.length > 0) {
+    const idx = syls.length - 1;
+    records.push({
+      eojeol_idx: idx,
+      rule_label: slopeBias > 0 ? 'pitch_rising_excess' : 'pitch_falling_excess',
+      severity: Math.abs(slopeBias) >= 0.15 ? 'major' : 'minor',
+      feedback_text:
+        slopeBias > 0
+          ? `'${syls[idx]}' 어절의 후반에서 음이 올라갔어요. 더 평평하게 말해봐요.`
+          : `'${syls[idx]}' 어절의 후반에서 음이 떨어졌어요. 더 평평하게 말해봐요.`,
+      evidence_metrics: { eojeol_label: syls[idx] },
+    });
+  }
+
+  return {
+    reference_text: syls.join(''),
+    records,
+    summary_when_no_outlier: records.length === 0 ? '잘 발화했어요!' : null,
+    prosody_plot: {
+      native_f0_zscore: native,
+      learner_f0_zscore: learner,
+      learner_time_at_step: times,
+      eojeol_boundaries,
+    },
+  };
 }
 
 function readyResponse(opts: {
@@ -128,7 +165,7 @@ function readyResponse(opts: {
   status: EvaluationStatus;
   overall: number;
   issues: BackendIssue[];
-  prosody: BackendProsodyPoint[];
+  prosody: BackendProsodyResult;
   prosodyExecuted: boolean;
   reason: string;
 }): BackendFullResponse {
@@ -227,7 +264,7 @@ export async function buildScenarioResponse(
             status_message: '오디오가 너무 짧거나 조용해요',
           },
         },
-        prosody_result: [],
+        prosody_result: {},
         pipeline_state: { prosody_executed: false, reason: 'retry' },
       };
 
@@ -239,7 +276,7 @@ export async function buildScenarioResponse(
             status_message: '강제 정렬 신뢰도가 낮아 평가에 사용할 수 없어요',
           },
         },
-        prosody_result: [],
+        prosody_result: {},
         pipeline_state: { prosody_executed: false, reason: 'discarded' },
       };
 
@@ -249,7 +286,7 @@ export async function buildScenarioResponse(
         status: 'ready',
         overall: 84,
         issues: makePhonemeIssues(syls, [Math.max(0, syls.length - 2)], ['연음 처리에 주의']),
-        prosody: [],
+        prosody: {},
         prosodyExecuted: false,
         reason: 'tts_unavailable',
       });

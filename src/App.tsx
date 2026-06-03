@@ -12,6 +12,7 @@ import SituationStep1Page from './pages/SituationStep1Page';
 import SituationStep2Page from './pages/SituationStep2Page';
 import SituationStep3Page from './pages/SituationStep3Page';
 import SituationResultPage from './pages/SituationResultPage';
+import AdminPage from './pages/AdminPage';
 
 export default function App() {
   return (
@@ -29,6 +30,10 @@ export default function App() {
         <Route path="/situations/:id/step2" element={<SituationStep2Page />} />
         <Route path="/situations/:id/step3" element={<SituationStep3Page />} />
         <Route path="/situations/:id/result" element={<SituationResultPage />} />
+
+        {/* Local-only card authoring tool. AdminPage itself redirects to / when
+            not served from localhost (see lib/adminEnv). */}
+        <Route path="/admin" element={<AdminPage />} />
       </Routes>
       {/* Floating dev panel — runtime mock toggle + scenario picker.
           Off by default. Enable for a session by setting

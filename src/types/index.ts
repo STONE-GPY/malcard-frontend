@@ -110,20 +110,52 @@ export interface BackendPhonemeResult {
   };
 }
 
-export interface BackendProsodyPoint {
-  syllable_idx: number;
-  syllable_label: string;
-  native_start: number;
-  learner_start: number;
-  rmse: number;
-  pearson: number;
-  slope_diff: number;
-  duration_ratio: number;
+/** F0 comparison plot (lens-rule v3): per MFCC-DTW path-step z-score curves. */
+export interface ProsodyBoundary {
+  path_step: number;
+  /** eojeol label at this step; the last entry is the end sentinel (label === null). */
+  label: string | null;
+}
+
+export interface ProsodyPlot {
+  learner_f0_zscore: number[];
+  native_f0_zscore: number[];
+  learner_time_at_step: number[]; // seconds, per step
+  eojeol_boundaries: ProsodyBoundary[];
+}
+
+export interface ProsodyRecordWindow {
+  learner_time_ratio?: [number, number];
+  delta_diff?: number;
+  syllable?: string;
+}
+
+/** Rule-based prosody finding (pitch_rising_excess, pitch_offset, …). */
+export interface ProsodyRecord {
+  eojeol_idx: number;
+  rule_label: string;
+  severity: 'minor' | 'major';
+  trigger_lens?: string;
+  evidence_metrics?: {
+    eojeol_label?: string;
+    windows?: ProsodyRecordWindow[];
+    [k: string]: unknown;
+  };
+  syllable_hint?: string | null;
+  feedback_text: string;
+}
+
+/** /analysis/full `prosody_result` = analyze() output. `{}` when not executed. */
+export interface BackendProsodyResult {
+  reference_text?: string;
+  records?: ProsodyRecord[];
+  summary_when_no_outlier?: string | null;
+  prosody_plot?: ProsodyPlot;
 }
 
 export interface BackendFullResponse {
   phoneme_result: BackendPhonemeResult;
-  prosody_result: BackendProsodyPoint[];
+  prosody_result: BackendProsodyResult;
   pipeline_state: {
     prosody_executed: boolean;
     reason: string;
@@ -144,10 +176,36 @@ export interface PhonemeResultUi {
   ipa?: string;
 }
 
-export interface IntonationPointUi {
-  c: string;
-  native: number;
-  mine: number;
+/** One point of the F0 comparison chart, keyed by MFCC-DTW path step. */
+export interface ProsodyPointUi {
+  step: number;
+  t: number; // learner time at this step (seconds)
+  native: number | null;
+  mine: number | null;
+}
+
+export interface ProsodyBoundaryUi {
+  step: number;
+  label: string;
+}
+
+export interface ProsodyZoneUi {
+  from: number;
+  to: number;
+  rule: string;
+  severity: 'minor' | 'major';
+}
+
+export interface ProsodyUi {
+  points: ProsodyPointUi[];
+  /** Labeled eojeol boundaries (end sentinel excluded) — drives X-axis ticks. */
+  boundaries: ProsodyBoundaryUi[];
+  maxStep: number;
+  /** Problem regions derived from records, shaded on the chart. */
+  zones: ProsodyZoneUi[];
+  records: ProsodyRecord[];
+  /** summary_when_no_outlier (present when records is empty). */
+  summary?: string | null;
 }
 
 export interface AnalysisResult {
@@ -159,8 +217,8 @@ export interface AnalysisResult {
   phonemes: PhonemeResultUi[];
   /** IPA-level issue cards from the backend (description + tip in Korean). */
   issues: IssueCardUi[];
-  intonation: IntonationPointUi[];
-  intonationWarning: string;
+  /** F0 comparison chart + rule-based prosody feedback (undefined when not executed). */
+  prosody?: ProsodyUi;
   aiFeedback: string;
   prosodyExecuted: boolean;
 }

@@ -13,7 +13,7 @@ const baseResponse = (overrides: Partial<BackendFullResponse> = {}): BackendFull
       issues: [],
     },
   },
-  prosody_result: [],
+  prosody_result: {},
   pipeline_state: { prosody_executed: true, reason: 'ready' },
   ...overrides,
 });
@@ -65,32 +65,70 @@ describe('mapAnalysisResponse', () => {
     expect(r.phonemes[1].correct).toBe(false);
   });
 
-  it('synthesizes intonation when prosody_result has slope_diff', () => {
+  it('maps prosody_plot into a path-step F0 chart model', () => {
     const r = mapAnalysisResponse(
       baseResponse({
-        prosody_result: [
-          { syllable_idx: 0, syllable_label: '안', native_start: 0, learner_start: 0, rmse: 0.3, pearson: 0.8, slope_diff: 0, duration_ratio: 1 },
-          { syllable_idx: 1, syllable_label: '녕', native_start: 0.2, learner_start: 0.2, rmse: 0.3, pearson: 0.8, slope_diff: -0.2, duration_ratio: 1 },
-        ],
+        prosody_result: {
+          reference_text: REF,
+          records: [],
+          summary_when_no_outlier: '잘 발화했어요!',
+          prosody_plot: {
+            native_f0_zscore: [0.2, 0.0, -0.1, -0.3],
+            learner_f0_zscore: [0.3, 0.1, -0.2, -0.4],
+            learner_time_at_step: [0, 0.01, 0.02, 0.03],
+            eojeol_boundaries: [
+              { path_step: 0, label: '안녕' },
+              { path_step: 2, label: '하세요' },
+              { path_step: 3, label: null },
+            ],
+          },
+        },
       }),
       REF,
     );
-    expect(r.intonation).toHaveLength(2);
-    expect(r.intonation[0].native).toBeGreaterThan(0);
-    // Negative slope_diff makes mine lower than native
-    expect(r.intonation[1].mine).toBeLessThan(r.intonation[1].native);
+    expect(r.prosody).toBeDefined();
+    expect(r.prosody!.points).toHaveLength(4);
+    expect(r.prosody!.points[0]).toMatchObject({ step: 0, t: 0, native: 0.2, mine: 0.3 });
+    expect(r.prosody!.maxStep).toBe(3);
+    // sentinel boundary (label === null) is excluded
+    expect(r.prosody!.boundaries).toEqual([
+      { step: 0, label: '안녕' },
+      { step: 2, label: '하세요' },
+    ]);
+    expect(r.prosody!.records).toHaveLength(0);
+    expect(r.prosody!.summary).toBe('잘 발화했어요!');
   });
 
-  it('emits intonation warning keys based on prosody trend', () => {
+  it('derives problem zones from records using eojeol boundaries', () => {
     const r = mapAnalysisResponse(
       baseResponse({
-        prosody_result: [
-          { syllable_idx: 0, syllable_label: '안', native_start: 0, learner_start: 0, rmse: 0.3, pearson: 0.8, slope_diff: -0.2, duration_ratio: 1 },
-        ],
+        prosody_result: {
+          records: [
+            { eojeol_idx: 1, rule_label: 'pitch_rising_excess', severity: 'major', feedback_text: 'x' },
+          ],
+          prosody_plot: {
+            native_f0_zscore: [0, 0, 0, 0],
+            learner_f0_zscore: [0, 0, 0, 0],
+            learner_time_at_step: [0, 1, 2, 3],
+            eojeol_boundaries: [
+              { path_step: 0, label: '오늘' },
+              { path_step: 2, label: '좋네요' },
+              { path_step: 3, label: null },
+            ],
+          },
+        },
       }),
       REF,
     );
-    expect(r.intonationWarning).toBe('intonation.endRiseLow');
+    // eojeol_idx 1 spans boundary[1].path_step → boundary[2].path_step
+    expect(r.prosody!.zones).toEqual([
+      { from: 2, to: 3, rule: 'pitch_rising_excess', severity: 'major' },
+    ]);
+  });
+
+  it('returns undefined prosody when prosody_plot is absent', () => {
+    const r = mapAnalysisResponse(baseResponse({ prosody_result: {} }), REF);
+    expect(r.prosody).toBeUndefined();
   });
 
   it('preserves status and prosody_executed flag', () => {
@@ -116,7 +154,7 @@ describe('mapAnalysisResponse', () => {
           status: { evaluation_status: 'ready' },
           llm_feedback_input: { score_breakdown: { overall: 90 } },
         },
-        prosody_result: [],
+        prosody_result: {},
         pipeline_state: { prosody_executed: false, reason: 'ready' },
       },
       '버스',

@@ -1,5 +1,5 @@
 import { useCallback, useEffect, useRef, useState } from 'react';
-import { blobToWav } from '../lib/wav';
+import { float32ToWav } from '../lib/wav';
 
 export type RecorderStatus =
   | 'idle'
@@ -43,11 +43,16 @@ export function useRecorder(opts: UseRecorderOptions = {}): UseRecorderReturn {
   const [level, setLevel] = useState(0);
   const [errorMessage, setErrorMessage] = useState<string | null>(null);
 
-  const recorderRef = useRef<MediaRecorder | null>(null);
   const streamRef = useRef<MediaStream | null>(null);
   const audioCtxRef = useRef<AudioContext | null>(null);
   const analyserRef = useRef<AnalyserNode | null>(null);
-  const chunksRef = useRef<Blob[]>([]);
+  const sourceRef = useRef<MediaStreamAudioSourceNode | null>(null);
+  const processorRef = useRef<ScriptProcessorNode | null>(null);
+  // Accumulated raw PCM captured straight off the mic source — the exact signal
+  // the level meter measures, so a non-zero meter guarantees non-zero audio.
+  const pcmChunksRef = useRef<Float32Array[]>([]);
+  const captureRateRef = useRef(16000);
+  const finalizedRef = useRef(false);
   const startedAtRef = useRef(0);
   const lastSpeechAtRef = useRef(0);
   const hasSpokenRef = useRef(false);
@@ -63,6 +68,13 @@ export function useRecorder(opts: UseRecorderOptions = {}): UseRecorderReturn {
       clearTimeout(maxTimerRef.current);
       maxTimerRef.current = null;
     }
+    if (processorRef.current) {
+      processorRef.current.onaudioprocess = null;
+      processorRef.current.disconnect();
+      processorRef.current = null;
+    }
+    sourceRef.current?.disconnect();
+    sourceRef.current = null;
     streamRef.current?.getTracks().forEach((t) => t.stop());
     streamRef.current = null;
     if (audioCtxRef.current) {
@@ -74,10 +86,38 @@ export function useRecorder(opts: UseRecorderOptions = {}): UseRecorderReturn {
 
   useEffect(() => () => cleanup(), [cleanup]);
 
+  // Concatenate captured PCM → resample to 16 kHz mono WAV → preview.
+  const finalize = useCallback(async () => {
+    if (finalizedRef.current) return;
+    finalizedRef.current = true;
+
+    const chunks = pcmChunksRef.current;
+    const total = chunks.reduce((n, c) => n + c.length, 0);
+    const pcm = new Float32Array(total);
+    let offset = 0;
+    for (const c of chunks) {
+      pcm.set(c, offset);
+      offset += c.length;
+    }
+    const rate = captureRateRef.current;
+    cleanup();
+
+    try {
+      const wav = await float32ToWav(pcm, rate, 16000);
+      setAudioBlob(wav);
+    } catch (err) {
+      console.error('[useRecorder] WAV encode failed', err);
+      setStatus('error');
+      setErrorMessage('녹음을 처리하지 못했습니다.');
+      return;
+    }
+    setStatus('preview');
+  }, [cleanup]);
+
   const stop = useCallback(() => {
-    const rec = recorderRef.current;
-    if (rec && rec.state === 'recording') rec.stop();
-  }, []);
+    if (finalizedRef.current) return;
+    void finalize();
+  }, [finalize]);
 
   const start = useCallback(async () => {
     setErrorMessage(null);
@@ -86,45 +126,65 @@ export function useRecorder(opts: UseRecorderOptions = {}): UseRecorderReturn {
     setLevel(0);
     setStatus('requesting');
 
+    // CRITICAL: Create the AudioContext synchronously within the click-handler
+    // frame, BEFORE any await. Chrome's autoplay policy puts a context that is
+    // created after an await into "suspended" state. When suspended the
+    // ScriptProcessorNode onaudioprocess callbacks still fire, but inputBuffer
+    // is filled with zeros — not real mic data — producing a silent WAV.
+    // Creating the context here (while the user-gesture activation is still
+    // live) ensures it starts in "running" state.
+    const Ctx =
+      window.AudioContext ?? (window as WindowWithWebkitAudio).webkitAudioContext;
+    if (!Ctx) {
+      setStatus('error');
+      setErrorMessage('AudioContext를 지원하지 않는 브라우저입니다.');
+      return;
+    }
+    const audioCtx = new Ctx();
+    audioCtxRef.current = audioCtx;
+    captureRateRef.current = audioCtx.sampleRate;
+
     try {
-      const stream = await navigator.mediaDevices.getUserMedia({ audio: true });
+      // Disable Chrome's built-in audio processing — echo cancellation and
+      // noise suppression can aggressively suppress mic input to near-zero when
+      // the AudioContext is also connected to the destination node.
+      const stream = await navigator.mediaDevices.getUserMedia({
+        audio: {
+          echoCancellation: false,
+          noiseSuppression: false,
+          autoGainControl: false,
+        },
+      });
       streamRef.current = stream;
 
-      const Ctx =
-        window.AudioContext ?? (window as WindowWithWebkitAudio).webkitAudioContext;
-      if (!Ctx) throw new Error('AudioContext unsupported');
-      const audioCtx = new Ctx();
-      audioCtxRef.current = audioCtx;
+      // Safety net: if the permission dialog exhausted the transient user
+      // activation the context may still be suspended — resume it explicitly.
+      if (audioCtx.state !== 'running') {
+        await audioCtx.resume();
+      }
+
       const source = audioCtx.createMediaStreamSource(stream);
+      sourceRef.current = source;
       const analyser = audioCtx.createAnalyser();
       analyser.fftSize = 1024;
       source.connect(analyser);
       analyserRef.current = analyser;
 
-      const recorder = new MediaRecorder(stream);
-      recorderRef.current = recorder;
-      chunksRef.current = [];
+      // Capture raw PCM straight off the mic source. ScriptProcessorNode is
+      // deprecated but universally supported and avoids the MediaRecorder →
+      // decodeAudioData → re-render chain that intermittently produced silent
+      // WAVs. Output is left as zeros (no echo back to speakers).
+      pcmChunksRef.current = [];
+      finalizedRef.current = false;
       hasSpokenRef.current = false;
-
-      recorder.ondataavailable = (e) => {
-        if (e.data.size > 0) chunksRef.current.push(e.data);
+      const processor = audioCtx.createScriptProcessor(4096, 1, 1);
+      processorRef.current = processor;
+      processor.onaudioprocess = (e: AudioProcessingEvent) => {
+        if (finalizedRef.current) return;
+        pcmChunksRef.current.push(new Float32Array(e.inputBuffer.getChannelData(0)));
       };
-      recorder.onstop = async () => {
-        const recordedMime = recorder.mimeType || 'audio/webm';
-        const recorded = new Blob(chunksRef.current, { type: recordedMime });
-        try {
-          // Backend prosody pipeline (parselmouth) only reads WAV/AIFF/FLAC.
-          // Decode the browser-encoded blob and re-encode as 16 kHz mono PCM WAV
-          // so both phoneme (librosa) and prosody stages can read it directly.
-          const wav = await blobToWav(recorded, 16000);
-          setAudioBlob(wav);
-        } catch (err) {
-          console.error('[useRecorder] WAV encode failed, falling back to raw blob', err);
-          setAudioBlob(recorded);
-        }
-        setStatus('preview');
-        cleanup();
-      };
+      source.connect(processor);
+      processor.connect(audioCtx.destination);
 
       const buffer = new Float32Array(analyser.fftSize);
       const tick = () => {
@@ -158,7 +218,6 @@ export function useRecorder(opts: UseRecorderOptions = {}): UseRecorderReturn {
 
       startedAtRef.current = performance.now();
       lastSpeechAtRef.current = startedAtRef.current;
-      recorder.start();
       setStatus('recording');
       rafRef.current = requestAnimationFrame(tick);
 
@@ -176,6 +235,8 @@ export function useRecorder(opts: UseRecorderOptions = {}): UseRecorderReturn {
   }, [maxDuration, minDuration, silenceDuration, silenceThreshold, stop, cleanup]);
 
   const reset = useCallback(() => {
+    finalizedRef.current = true;
+    pcmChunksRef.current = [];
     cleanup();
     setStatus('idle');
     setAudioBlob(null);

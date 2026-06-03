@@ -5,6 +5,7 @@ import { useCardStore } from '../stores/useCardStore';
 import { useRecorder } from '../hooks/useRecorder';
 import { tokens } from '../theme/tokens';
 import { IconArrowLeft, IconMic, IconStop, IconVolume } from '../components/icons';
+import { cancelSpeech, speakText } from '../lib/speech';
 
 const MAX_DURATION_MS = 12_000;
 const MIN_DURATION_MS = 800;
@@ -46,32 +47,29 @@ export default function CardLearnPage() {
   // Without this, navigating away mid-playback leaves the synth speaking.
   useEffect(() => {
     return () => {
-      if (typeof speechSynthesis !== 'undefined') {
-        speechSynthesis.cancel();
-      }
+      cancelSpeech();
       setIsSpeaking(false);
     };
   }, [currentCard?.id]);
 
   const handleTTS = useCallback(() => {
     if (!currentCard) return;
-    if (typeof speechSynthesis === 'undefined') return;
 
     // If something is already speaking, treat the click as a stop.
-    if (speechSynthesis.speaking || speechSynthesis.pending) {
-      speechSynthesis.cancel();
+    if (isSpeaking) {
+      cancelSpeech();
       setIsSpeaking(false);
       return;
     }
 
-    const utterance = new SpeechSynthesisUtterance(currentCard.korean);
-    utterance.lang = 'ko-KR';
-    utterance.rate = 0.8;
-    utterance.onend = () => setIsSpeaking(false);
-    utterance.onerror = () => setIsSpeaking(false);
+    // Backend /tts (Google→edge) first, browser TTS fallback — all via lib/speech.
     setIsSpeaking(true);
-    speechSynthesis.speak(utterance);
-  }, [currentCard]);
+    speakText(currentCard.korean, {
+      rate: 0.8,
+      onstart: () => setIsSpeaking(true),
+      onend: () => setIsSpeaking(false),
+    });
+  }, [currentCard, isSpeaking]);
 
   const toggleRecord = useCallback(() => {
     if (recorder.status === 'recording') recorder.stop();

@@ -4,12 +4,12 @@ import type {
   BackendCard,
   BackendFullResponse,
   BackendIssue,
-  BackendProsodyPoint,
+  BackendProsodyResult,
   BackendReferencePhoneme,
   Card,
-  IntonationPointUi,
   IssueCardUi,
   PhonemeResultUi,
+  ProsodyUi,
 } from '../types';
 import { difficultyForCard, emojiForCard } from '../data/cards';
 
@@ -274,28 +274,55 @@ function buildIssueCards(
     .filter((x): x is IssueCardUi => x !== null);
 }
 
-function buildIntonation(
-  referenceText: string,
-  prosody: BackendProsodyPoint[],
-): IntonationPointUi[] {
-  const syls = syllablesOf(referenceText);
-  const baseLow = 60;
-  const baseHigh = 92;
+// Round to 2 decimals — keeps chart values and tooltips readable instead of
+// long z-score floats.
+const round2 = (v: number): number => Math.round(v * 100) / 100;
 
-  // No real prosody data — return empty so the UI hides the intonation
-  // section entirely instead of fabricating a flat native==mine line that
-  // implies analysis succeeded.
-  if (prosody.length === 0) {
-    return [];
+// Build the F0 comparison chart model from the backend `prosody_plot`
+// (lens-rule v3): per MFCC-DTW path-step z-score curves for native(TTS) vs
+// learner, eojeol boundaries for the x-axis, and problem zones derived from
+// `records`. Returns undefined when no plot is present so the UI hides the
+// section rather than drawing an empty chart.
+function buildProsody(pr: BackendProsodyResult | undefined): ProsodyUi | undefined {
+  const plot = pr?.prosody_plot;
+  const nz = plot?.native_f0_zscore;
+  const lz = plot?.learner_f0_zscore;
+  if (!Array.isArray(nz) || !Array.isArray(lz) || nz.length === 0) {
+    return undefined;
   }
 
-  return prosody.map((p, i) => {
-    const t = i / Math.max(prosody.length - 1, 1);
-    const native = Math.round(baseLow + t * (baseHigh - baseLow));
-    const deviation = (p.slope_diff ?? 0) * 35;
-    const mine = Math.round(Math.max(40, Math.min(100, native + deviation)));
-    return { c: p.syllable_label || syls[i] || '?', native, mine };
-  });
+  const times = plot?.learner_time_at_step ?? [];
+  const n = Math.max(nz.length, lz.length);
+  const points = Array.from({ length: n }, (_, step) => ({
+    step,
+    t: typeof times[step] === 'number' ? round2(times[step]) : step,
+    native: typeof nz[step] === 'number' ? round2(nz[step]) : null,
+    mine: typeof lz[step] === 'number' ? round2(lz[step]) : null,
+  }));
+
+  const rawBounds = plot?.eojeol_boundaries ?? [];
+  const maxStep = rawBounds.length ? rawBounds[rawBounds.length - 1].path_step : n - 1;
+  const boundaries = rawBounds
+    .filter((b) => b.label != null)
+    .map((b) => ({ step: b.path_step, label: b.label as string }));
+
+  // Each record targets an eojeol; shade [boundary[idx], boundary[idx+1]).
+  const records = pr?.records ?? [];
+  const zones = records.map((rec) => ({
+    from: rawBounds[rec.eojeol_idx]?.path_step ?? 0,
+    to: rawBounds[rec.eojeol_idx + 1]?.path_step ?? maxStep,
+    rule: rec.rule_label,
+    severity: rec.severity,
+  }));
+
+  return {
+    points,
+    boundaries,
+    maxStep,
+    zones,
+    records,
+    summary: pr?.summary_when_no_outlier ?? null,
+  };
 }
 
 function pickFeedbackMessage(score: number): string {
@@ -303,19 +330,6 @@ function pickFeedbackMessage(score: number): string {
   if (score >= 80) return 'message.great';
   if (score >= 60) return 'message.keepGoing';
   return 'message.tryAgain';
-}
-
-function pickIntonationWarning(prosody: BackendProsodyPoint[]): string {
-  // Empty prosody is handled upstream by buildIntonation returning [] so the
-  // intonation section doesn't render at all — no warning needed here.
-  if (prosody.length === 0) return '';
-  const last = prosody[prosody.length - 1];
-  if (last && last.slope_diff < -0.05) return 'intonation.endRiseLow';
-  if (last && last.slope_diff > 0.1) return 'intonation.endRiseHigh';
-  const avgPearson =
-    prosody.reduce((a, b) => a + (b.pearson ?? 0), 0) / Math.max(prosody.length, 1);
-  if (avgPearson < 0.5) return 'intonation.choppy';
-  return 'intonation.natural';
 }
 
 function pickAiFeedback(
@@ -371,8 +385,7 @@ export function mapAnalysisResponse(
     scoreBreakdown: breakdown,
     phonemes,
     issues: buildIssueCards(issues, phonemes, alignmentSteps, tokenToSyllable),
-    intonation: buildIntonation(reference, res.prosody_result ?? []),
-    intonationWarning: pickIntonationWarning(res.prosody_result ?? []),
+    prosody: buildProsody(res.prosody_result),
     aiFeedback: pickAiFeedback(status, reference, score, issues, llmFeedback),
     prosodyExecuted: res.pipeline_state?.prosody_executed ?? false,
   };

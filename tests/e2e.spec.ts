@@ -17,12 +17,14 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     await seedAutoplayFalse(page);
   });
 
-  test('Home renders cards from /cards endpoint', async ({ page }) => {
+  test('Home renders phoneme practice cards (local data)', async ({ page }) => {
+    // Phoneme practice cards are served from local static data — the backend
+    // /cards endpoint was redesigned to serve situation cards only.
     await mockBackend(page);
     await page.goto('/');
     await expect(page.getByRole('heading', { name: 'MalCard' })).toBeVisible();
     await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
+    expect(await page.locator('[data-testid="card-row"]').count()).toBeGreaterThanOrEqual(3);
     await expect(page.getByText('어디서 내려요?')).toBeVisible();
     await expect(page.getByText('Где выходить?')).toBeVisible();
   });
@@ -31,39 +33,10 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     await mockBackend(page);
 
     await page.goto('/');
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
-    await page.locator('[data-testid="category-situations"]').click();
+    await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
+    await page.locator('[data-testid="mode-situation"]').click();
     await expect(page.locator('[data-testid="card-row"]')).toHaveCount(0);
     await expect(page.locator('[data-testid="situation-card"]').first()).toBeVisible();
-  });
-
-  test('Cards endpoint failure shows error panel with retry', async ({ page }) => {
-    const cardsRoute = /\/api\.test\/cards/;
-    await page.route(cardsRoute, async (route) => {
-      await route.fulfill({
-        status: 500,
-        contentType: 'application/json',
-        body: JSON.stringify({
-          error: { code: 'INTERNAL_ERROR', message: 'boom' },
-        }),
-      });
-    });
-
-    await page.goto('/');
-    await expect(page.locator('[data-testid="cards-error"]')).toBeVisible();
-    await expect(page.locator('[data-testid="cards-error"]')).toContainText('서버 오류');
-
-    await page.unroute(cardsRoute);
-    await page.route(cardsRoute, async (route) => {
-      await route.fulfill({
-        status: 200,
-        contentType: 'application/json',
-        body: JSON.stringify({ items: [], total: 0, limit: 50, offset: 0 }),
-      });
-    });
-
-    await page.getByRole('button', { name: '다시 시도' }).click();
-    await expect(page.locator('[data-testid="empty-cards"]')).toBeVisible();
   });
 
   test('Full flow: record → loading → ready result with mapped score/phonemes/intonation', async ({ page }) => {
@@ -263,8 +236,8 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
     });
 
     await page.goto('/');
-    await expect(page.locator('[data-testid="card-row"]')).toHaveCount(3);
-    await page.locator('[data-testid="category-situations"]').click();
+    await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
+    await page.locator('[data-testid="mode-situation"]').click();
     await expect(page.locator('[data-situation-id="unit1_01"]')).toBeVisible();
 
     await page.locator('[data-testid="deck-shopping"]').click();

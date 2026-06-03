@@ -19,7 +19,7 @@ export default function SituationStep3Page() {
 
   const [isRecording, setIsRecording] = useState(false);
   const [transcript, setTranscript] = useState('');
-  const [feedback, setFeedback] = useState<'idle' | 'success' | 'fail' | 'error'>('idle');
+  const [feedback, setFeedback] = useState<'idle' | 'success' | 'fail' | 'error' | 'unsupported'>('idle');
   const [failCount, setFailCount] = useState(0);
   const [errorMessage, setErrorMessage] = useState('');
   const [isListening, setIsListening] = useState(false);
@@ -34,8 +34,10 @@ export default function SituationStep3Page() {
 
   useEffect(() => {
     if (!SpeechRecognition) {
+      // 브라우저가 Web Speech Recognition을 지원하지 않음(Firefox 등). 'error'와
+      // 구분해 Chrome/Edge 안내 + 건너뛰기 UI를 보여준다.
       // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFeedback('error');
+      setFeedback('unsupported');
       setErrorMessage(t('situation.speechUnsupported'));
       return;
     }
@@ -196,8 +198,27 @@ export default function SituationStep3Page() {
               {errorMessage}
             </div>
           )}
+          {feedback === 'unsupported' && (
+            <div
+              data-testid="situation-speech-unsupported"
+              style={{
+                background: '#EFF6FF',
+                border: '1px solid #BFDBFE',
+                color: '#1D4ED8',
+                fontSize: 14,
+                lineHeight: 1.6,
+                padding: '14px 16px',
+                borderRadius: 12,
+                marginBottom: 24,
+                maxWidth: '90%',
+                textAlign: 'center',
+              }}
+            >
+              {errorMessage}
+            </div>
+          )}
 
-          {feedback !== 'success' && feedback !== 'error' && failCount < 3 ? (
+          {feedback !== 'success' && feedback !== 'error' && feedback !== 'unsupported' && failCount < 3 ? (
             <button
               data-testid="situation-mic"
               onClick={handleMicClick}
@@ -236,9 +257,11 @@ export default function SituationStep3Page() {
                 cursor: 'pointer',
               }}
             >
-              {currentPuzzleIndex < currentSituation.puzzles.length - 1
-                ? t('situation.nextSentence')
-                : t('situation.viewResult')}
+              {feedback === 'unsupported' || feedback === 'error'
+                ? t('situation.speechSkip')
+                : currentPuzzleIndex < currentSituation.puzzles.length - 1
+                  ? t('situation.nextSentence')
+                  : t('situation.viewResult')}
             </button>
           )}
 

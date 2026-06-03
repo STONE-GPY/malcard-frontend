@@ -87,16 +87,37 @@ function buildMockBackendResponse(card: Card): BackendFullResponse {
         issues,
       },
     },
-    prosody_result: syls.map((ko, idx) => ({
-      syllable_idx: idx,
-      syllable_label: ko,
-      native_start: idx * 0.18,
-      learner_start: idx * 0.18 + (rand() - 0.5) * 0.04,
-      rmse: 0.3 + rand() * 0.3,
-      pearson: 0.6 + rand() * 0.3,
-      slope_diff: (rand() - 0.6) * 0.25,
-      duration_ratio: 0.95 + rand() * 0.2,
-    })),
+    prosody_result: (() => {
+      const round = (v: number) => Math.round(v * 100) / 100;
+      const n = Math.max(40, syls.length * 12);
+      const native: number[] = [];
+      const learner: number[] = [];
+      const times: number[] = [];
+      const bias = (rand() - 0.5) * 0.4;
+      for (let i = 0; i < n; i++) {
+        const x = i / n;
+        const base = 1.0 - 1.8 * x + 0.35 * Math.sin(x * Math.PI * Math.max(2, syls.length));
+        native.push(round(base));
+        learner.push(round(base + bias * 6 * x + 0.12 * Math.sin(x * Math.PI * 7)));
+        times.push(round(i * 0.01));
+      }
+      const eojeol_boundaries = syls.map((ko, i) => ({
+        path_step: Math.round((i / syls.length) * n),
+        label: ko as string | null,
+      }));
+      eojeol_boundaries.push({ path_step: n - 1, label: null });
+      return {
+        reference_text: reference,
+        records: [],
+        summary_when_no_outlier: '잘 발화했어요!',
+        prosody_plot: {
+          native_f0_zscore: native,
+          learner_f0_zscore: learner,
+          learner_time_at_step: times,
+          eojeol_boundaries,
+        },
+      };
+    })(),
     pipeline_state: { prosody_executed: true, reason: 'ready' },
   };
 }

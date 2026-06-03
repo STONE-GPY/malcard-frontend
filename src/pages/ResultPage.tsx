@@ -5,6 +5,8 @@ import {
   CartesianGrid,
   Line,
   LineChart,
+  ReferenceArea,
+  ReferenceLine,
   ResponsiveContainer,
   Tooltip,
   XAxis,
@@ -716,114 +718,201 @@ export default function ResultPage() {
         </div>
       )}
 
-      {r.prosodyExecuted && r.intonation.length > 0 && (
-        <div style={sectionStyle} data-testid="intonation-section">
-          <div
-            style={{
-              display: 'flex',
-              alignItems: 'center',
-              justifyContent: 'space-between',
-              marginBottom: 14,
-            }}
-          >
-            <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>
-              {t('result.intonation')}
-            </div>
+      {r.prosodyExecuted && r.prosody && r.prosody.points.length > 0 && (() => {
+        const p = r.prosody;
+        const zoneFill = (sev: 'minor' | 'major') =>
+          sev === 'major' ? 'rgba(231,76,60,0.09)' : 'rgba(243,156,18,0.10)';
+        const sevColor = (sev: 'minor' | 'major') => (sev === 'major' ? '#E74C3C' : '#F39C12');
+        return (
+          <div style={sectionStyle} data-testid="intonation-section">
             <div
               style={{
-                display: 'inline-flex',
+                display: 'flex',
                 alignItems: 'center',
-                gap: 6,
-                background: '#FEF3C7',
-                color: '#B45309',
-                padding: '5px 10px',
-                borderRadius: 999,
-                fontSize: 12,
-                fontWeight: 600,
-                border: '1px solid rgba(245,158,11,0.2)',
+                justifyContent: 'space-between',
+                marginBottom: 14,
               }}
             >
-              <IconAlert size={12} stroke={2.4} />{' '}
-              {r.intonationWarning.startsWith('intonation.')
-                ? t(r.intonationWarning)
-                : r.intonationWarning}
-            </div>
-          </div>
-          <div style={{ height: 160, margin: '0 -8px' }}>
-            <ResponsiveContainer width="100%" height="100%">
-              <LineChart data={r.intonation} margin={{ top: 8, right: 8, left: -28, bottom: 0 }}>
-                <CartesianGrid strokeDasharray="3 3" stroke="#E2E8F0" vertical={false} />
-                <XAxis
-                  dataKey="c"
-                  tick={{ fontSize: 12, fill: '#64748B', fontFamily: 'Noto Sans KR' }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <YAxis
-                  domain={[40, 100]}
-                  tick={{ fontSize: 11, fill: '#94A3B8' }}
-                  axisLine={false}
-                  tickLine={false}
-                />
-                <Tooltip
-                  contentStyle={{
-                    background: '#0F172A',
-                    border: 'none',
-                    borderRadius: 12,
+              <div style={{ fontSize: 15, fontWeight: 700, letterSpacing: -0.2 }}>
+                {t('result.intonation')}
+              </div>
+              {p.records.length > 0 ? (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: '#FEF3C7',
+                    color: '#B45309',
+                    padding: '5px 10px',
+                    borderRadius: 999,
                     fontSize: 12,
-                    color: '#fff',
-                    boxShadow: '0 6px 16px rgba(0,0,0,0.2)',
+                    fontWeight: 600,
+                    border: '1px solid rgba(245,158,11,0.2)',
                   }}
-                  labelStyle={{ color: '#A5B4FC', fontWeight: 600 }}
-                  itemStyle={{ color: '#fff' }}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="native"
-                  stroke="#10B981"
-                  strokeWidth={3}
-                  dot={{ r: 4, fill: '#10B981', strokeWidth: 0 }}
-                  name={t('result.native')}
-                />
-                <Line
-                  type="monotone"
-                  dataKey="mine"
-                  stroke={tokens.primaryDark}
-                  strokeWidth={3}
-                  strokeDasharray="6 5"
-                  dot={{ r: 4, fill: tokens.primaryDark, strokeWidth: 0 }}
-                  name={t('result.mine')}
-                />
-              </LineChart>
-            </ResponsiveContainer>
-          </div>
-          <div
-            style={{
-              display: 'flex',
-              gap: 16,
-              justifyContent: 'center',
-              marginTop: 4,
-              fontSize: 12,
-            }}
-          >
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
-              <div style={{ width: 14, height: 3, background: '#10B981', borderRadius: 2 }} />
-              <span style={{ color: '#475569', fontWeight: 500 }}>{t('result.native')}</span>
+                >
+                  <IconAlert size={12} stroke={2.4} />{' '}
+                  {t('result.prosodyIssues', { count: p.records.length })}
+                </div>
+              ) : (
+                <div
+                  style={{
+                    display: 'inline-flex',
+                    alignItems: 'center',
+                    gap: 6,
+                    background: '#DCFCE7',
+                    color: '#15803D',
+                    padding: '5px 10px',
+                    borderRadius: 999,
+                    fontSize: 12,
+                    fontWeight: 600,
+                    border: '1px solid rgba(34,197,94,0.2)',
+                  }}
+                >
+                  {p.summary || t('result.prosodyGood')}
+                </div>
+              )}
             </div>
-            <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+
+            <div style={{ height: 200, margin: '0 -8px' }}>
+              <ResponsiveContainer width="100%" height="100%">
+                <LineChart data={p.points} margin={{ top: 8, right: 8, left: -8, bottom: 0 }}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#EEF1F5" />
+                  {p.zones.map((z, i) => (
+                    <ReferenceArea
+                      key={`z${i}`}
+                      x1={z.from}
+                      x2={z.to}
+                      y1={-3.5}
+                      y2={3.5}
+                      fill={zoneFill(z.severity)}
+                      stroke="none"
+                      ifOverflow="hidden"
+                    />
+                  ))}
+                  <ReferenceLine y={0} stroke="rgba(0,0,0,0.18)" strokeDasharray="6 4" />
+                  {p.boundaries.map((b, i) => (
+                    <ReferenceLine key={`b${i}`} x={b.step} stroke="#CBD5E1" strokeDasharray="4 4" />
+                  ))}
+                  <XAxis
+                    dataKey="step"
+                    type="number"
+                    domain={[0, p.maxStep]}
+                    ticks={p.boundaries.map((b) => b.step)}
+                    tickFormatter={(v) => p.boundaries.find((b) => b.step === v)?.label ?? ''}
+                    tick={{ fontSize: 12, fill: '#64748B', fontFamily: 'Noto Sans KR' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <YAxis
+                    domain={[-3.5, 3.5]}
+                    allowDataOverflow
+                    ticks={[-3, -2, -1, 0, 1, 2, 3]}
+                    width={24}
+                    tick={{ fontSize: 10, fill: '#94A3B8' }}
+                    axisLine={false}
+                    tickLine={false}
+                  />
+                  <Tooltip
+                    contentStyle={{
+                      background: '#0F172A',
+                      border: 'none',
+                      borderRadius: 12,
+                      fontSize: 12,
+                      color: '#fff',
+                      boxShadow: '0 6px 16px rgba(0,0,0,0.2)',
+                    }}
+                    labelStyle={{ color: '#A5B4FC', fontWeight: 600 }}
+                    itemStyle={{ color: '#fff' }}
+                    labelFormatter={(_label, payload) => {
+                      const pt = payload?.[0]?.payload as { t?: number; step?: number } | undefined;
+                      if (typeof pt?.t === 'number') return `${pt.t.toFixed(2)}s`;
+                      return `step ${pt?.step ?? ''}`;
+                    }}
+                    formatter={(value) => (typeof value === 'number' ? value.toFixed(2) : '—')}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="native"
+                    stroke="#185FA5"
+                    strokeWidth={2.5}
+                    dot={false}
+                    connectNulls
+                    name={t('result.native')}
+                  />
+                  <Line
+                    type="monotone"
+                    dataKey="mine"
+                    stroke="#993C1D"
+                    strokeWidth={2.5}
+                    dot={false}
+                    connectNulls
+                    name={t('result.mine')}
+                  />
+                </LineChart>
+              </ResponsiveContainer>
+            </div>
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 16,
+                justifyContent: 'center',
+                marginTop: 4,
+                fontSize: 12,
+              }}
+            >
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 14, height: 3, background: '#185FA5', borderRadius: 2 }} />
+                <span style={{ color: '#475569', fontWeight: 500 }}>{t('result.native')}</span>
+              </div>
+              <div style={{ display: 'flex', alignItems: 'center', gap: 6 }}>
+                <div style={{ width: 14, height: 3, background: '#993C1D', borderRadius: 2 }} />
+                <span style={{ color: '#475569', fontWeight: 500 }}>{t('result.mine')}</span>
+              </div>
+            </div>
+
+            {p.records.length > 0 && (
               <div
-                style={{
-                  width: 14,
-                  height: 3,
-                  borderRadius: 2,
-                  background: `repeating-linear-gradient(90deg, ${tokens.primaryDark} 0 4px, transparent 4px 7px)`,
-                }}
-              />
-              <span style={{ color: '#475569', fontWeight: 500 }}>{t('result.mine')}</span>
-            </div>
+                data-testid="prosody-records"
+                style={{ display: 'flex', flexDirection: 'column', gap: 8, marginTop: 14 }}
+              >
+                {p.records.map((rec, i) => (
+                  <div
+                    key={i}
+                    style={{
+                      background: '#F8FAFC',
+                      borderRadius: 10,
+                      borderLeft: `3px solid ${sevColor(rec.severity)}`,
+                      padding: '10px 12px',
+                    }}
+                  >
+                    <div style={{ display: 'flex', alignItems: 'center', gap: 8, marginBottom: 4 }}>
+                      <span
+                        style={{
+                          width: 8,
+                          height: 8,
+                          borderRadius: '50%',
+                          background: sevColor(rec.severity),
+                          flexShrink: 0,
+                        }}
+                      />
+                      {rec.evidence_metrics?.eojeol_label && (
+                        <span style={{ fontSize: 12, fontWeight: 700, color: '#334155' }}>
+                          {rec.evidence_metrics.eojeol_label}
+                        </span>
+                      )}
+                    </div>
+                    <div style={{ fontSize: 13, color: '#334155', lineHeight: 1.55 }}>
+                      {rec.feedback_text}
+                    </div>
+                  </div>
+                ))}
+              </div>
+            )}
           </div>
-        </div>
-      )}
+        );
+      })()}
 
       {/* Score history mini chart */}
       <div style={sectionStyle} data-testid="history-mini">

@@ -43,6 +43,38 @@ export async function blobToWav(
   return encodeWavMono16(rendered.getChannelData(0), targetSampleRate);
 }
 
+// Encode raw mic-captured Float32 PCM (at the capture sample rate) to a 16 kHz
+// mono PCM WAV. We resample the *already-captured* samples via OfflineAudioContext
+// — this is a deterministic operation on known-good data, unlike decodeAudioData
+// of a MediaRecorder webm/opus blob (which intermittently returned silent
+// buffers). The recorder taps the same mic source as the level meter, so what
+// the user sees as input level is exactly what gets encoded here.
+export async function float32ToWav(
+  samples: Float32Array,
+  sourceSampleRate: number,
+  targetSampleRate = 16000,
+): Promise<Blob> {
+  if (samples.length === 0) {
+    return encodeWavMono16(new Float32Array(0), targetSampleRate);
+  }
+  if (sourceSampleRate === targetSampleRate) {
+    return encodeWavMono16(samples, targetSampleRate);
+  }
+  const targetLen = Math.max(
+    1,
+    Math.ceil((samples.length * targetSampleRate) / sourceSampleRate),
+  );
+  const offline = new OfflineAudioContext(1, targetLen, targetSampleRate);
+  const buffer = offline.createBuffer(1, samples.length, sourceSampleRate);
+  buffer.getChannelData(0).set(samples);
+  const src = offline.createBufferSource();
+  src.buffer = buffer;
+  src.connect(offline.destination);
+  src.start(0);
+  const rendered = await offline.startRendering();
+  return encodeWavMono16(rendered.getChannelData(0), targetSampleRate);
+}
+
 function encodeWavMono16(samples: Float32Array, sampleRate: number): Blob {
   const numFrames = samples.length;
   const dataSize = numFrames * 2; // 16-bit mono
