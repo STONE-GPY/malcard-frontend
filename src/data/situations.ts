@@ -1,6 +1,6 @@
 /* eslint-disable @typescript-eslint/no-explicit-any */
 import type { Situation } from '../types';
-import { loadCustomSituations } from './adminCards';
+import { loadCustomSituationsAsync } from './adminCards';
 
 // Situation dataset lives in cards.json (80 situations, dialogue + puzzles).
 // This file is kept in sync with the backend's cards.json (identical content),
@@ -45,7 +45,7 @@ async function loadBaseSituations(): Promise<Situation[]> {
 
 export async function loadSituations(): Promise<Situation[]> {
   const base = await loadBaseSituations();
-  const custom = loadCustomSituations().map(withDifficulty);
+  const custom = (await loadCustomSituationsAsync()).map(withDifficulty);
   return [...base, ...custom];
 }
 

@@ -36,11 +36,19 @@ $NODE_DIR = Join-Path $RUNTIME "node\node-$NODE_VER-win-x64"
 $PNPM     = Join-Path $NODE_DIR 'pnpm.cmd'
 $PNPM_VER = '9.9.0'
 $CF       = Join-Path $RUNTIME 'cloudflared\cloudflared.exe'
+# Pin cloudflared to a specific release + verify its SHA256 (no `latest`, so the
+# downloaded executable is reproducible and tamper-evident). Bump both together.
+$CF_VER    = '2026.5.2'
+$CF_SHA256 = '20B9638F685333D623798E733EFFBAD2487093F15BA592F6C7752360FF3B7AB7'
 
 function Die($m) { Write-Host "[ERROR] $m" -ForegroundColor Red; exit 1 }
 
 if (-not (Test-Path (Join-Path $BACKEND 'app\main.py'))) {
-  Die 'backend submodule missing. Run: git submodule update --init --recursive'
+  Write-Host '[setup] fetching backend submodule ...'
+  & git -C $ROOT submodule update --init --recursive
+  if (-not (Test-Path (Join-Path $BACKEND 'app\main.py'))) {
+    Die 'backend submodule fetch failed (needs git + network). Run manually: git submodule update --init --recursive'
+  }
 }
 
 # --- portable Python (download once) ---------------------------------------
@@ -104,26 +112,43 @@ if (Test-Path $ART) {
 
 # --- cloudflared + qrcode (for the tunnel + QR) ----------------------------
 if (-not (Test-Path $CF)) {
-  Write-Host '[setup] downloading cloudflared ...'
+  Write-Host "[setup] downloading cloudflared $CF_VER ..."
   New-Item -ItemType Directory -Force (Split-Path $CF) | Out-Null
-  Invoke-WebRequest 'https://github.com/cloudflare/cloudflared/releases/latest/download/cloudflared-windows-amd64.exe' -OutFile $CF
+  Invoke-WebRequest "https://github.com/cloudflare/cloudflared/releases/download/$CF_VER/cloudflared-windows-amd64.exe" -OutFile $CF
   if (-not (Test-Path $CF)) { Die 'cloudflared download failed' }
+  $got = (Get-FileHash -Algorithm SHA256 $CF).Hash
+  if ($got -ne $CF_SHA256) {
+    Remove-Item $CF -EA SilentlyContinue
+    Die "cloudflared checksum mismatch (expected $CF_SHA256, got $got)"
+  }
 }
 $QPY = if (Test-Path $PBS_PY) { $PBS_PY } else { $PY }
 & $QPY -c 'import importlib.util,sys; sys.exit(0 if importlib.util.find_spec("qrcode") else 1)' 2>$null
 if ($LASTEXITCODE -ne 0) { Write-Host '[setup] installing qrcode ...'; & $QPY -m pip install qrcode --quiet --disable-pip-version-check 2>$null | Out-Null }
 
+# --- per-run access token (gates the public tunnel) ------------------------
+# Fresh random token each run. The Vite edge gate (vite.config.ts) requires it,
+# so the tunnel URL only works when opened via the tokened link/QR below. The
+# frontend process inherits it through the environment.
+$tkBytes = New-Object byte[] 16
+[Security.Cryptography.RandomNumberGenerator]::Create().GetBytes($tkBytes)
+$TOKEN = ([BitConverter]::ToString($tkBytes) -replace '-').ToLower()
+$env:MALCARD_TUNNEL_TOKEN = $TOKEN
+
 # --- launch backend + frontend (each in its own window) --------------------
-Write-Host '[start] backend  -> http://0.0.0.0:8000'
-$back = Start-Process $PY -ArgumentList '-m','uvicorn','app.main:app','--host','0.0.0.0','--port','8000' -WorkingDirectory $BACKEND -PassThru
+Write-Host '[start] backend  -> http://127.0.0.1:8000 (local only; reached via the Vite proxy)'
+$back = Start-Process $PY -ArgumentList '-m','uvicorn','app.main:app','--host','127.0.0.1','--port','8000' -WorkingDirectory $BACKEND -PassThru
 Write-Host '[start] frontend -> http://0.0.0.0:5173'
 $front = Start-Process $PNPM -ArgumentList 'dev' -WorkingDirectory $ROOT -PassThru
 
 function Stop-All {
+  # Kill only the process TREES this launcher started (taskkill /T also gets
+  # pnpm's node/vite/esbuild children). No port-based killing here -- that blunt
+  # fallback lives only in stop.bat, so we never kill unrelated processes.
   param($procs)
-  foreach ($p in $procs) { if ($p -and -not $p.HasExited) { Stop-Process -Id $p.Id -Force -EA SilentlyContinue } }
-  Get-NetTCPConnection -LocalPort 8000,5173 -State Listen -EA SilentlyContinue |
-    ForEach-Object { Stop-Process -Id $_.OwningProcess -Force -EA SilentlyContinue }
+  foreach ($p in $procs) {
+    if ($p -and -not $p.HasExited) { taskkill /F /T /PID $p.Id 2>$null | Out-Null }
+  }
 }
 
 try {
@@ -150,15 +175,21 @@ try {
   $lan = Get-NetIPAddress -AddressFamily IPv4 -EA SilentlyContinue |
          Where-Object { $_.IPAddress -notlike '127.*' -and $_.IPAddress -notlike '169.254.*' -and ($_.PrefixOrigin -eq 'Dhcp' -or $_.PrefixOrigin -eq 'Manual') } |
          Select-Object -First 1 -ExpandProperty IPAddress
+  # Every URL carries the per-run token (?token=...): the Vite edge gate stores
+  # it in a cookie on first visit, so the bare URL alone won't open the app.
+  $q = "?token=$TOKEN"
   Write-Host ''
   Write-Host '============================================================'
-  Write-Host '  Local   : http://localhost:5173'
-  if ($lan) { Write-Host "  Wi-Fi   : http://$lan`:5173" }
-  if ($url) { Write-Host "  Public  : $url" } else { Write-Host '  Public  : (tunnel URL not detected; see tunnel.log)' }
+  Write-Host "  Local   : http://localhost:5173/$q"
+  if ($lan) { Write-Host "  Wi-Fi   : http://$lan`:5173/$q" }
+  if ($url) { Write-Host "  Public  : $url/$q" } else { Write-Host '  Public  : (tunnel URL not detected; see tunnel.log)' }
   Write-Host '============================================================'
   if ($url) {
+    Write-Host '  [!] Anyone with the full link (incl. ?token=) can use the app -- no' -ForegroundColor Yellow
+    Write-Host '      per-user login. The bare URL without the token is rejected (403).' -ForegroundColor Yellow
+    Write-Host '      Share the link/QR carefully and press Ctrl+C when done.' -ForegroundColor Yellow
     Write-Host ''
-    & $QPY -c 'import qrcode,sys; q=qrcode.QRCode(border=2); q.add_data(sys.argv[1]); q.print_ascii(invert=True)' $url
+    & $QPY -c 'import qrcode,sys; q=qrcode.QRCode(border=2); q.add_data(sys.argv[1]); q.print_ascii(invert=True)' "$url/$q"
   }
   Write-Host ''
   Write-Host 'Running. Press Ctrl+C here to stop backend + frontend + tunnel.' -ForegroundColor Cyan

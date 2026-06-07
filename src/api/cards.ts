@@ -1,13 +1,14 @@
 import { mockBackendCards } from '../data/cards';
-import { loadCustomPhonemeCards } from '../data/adminCards';
+import { loadCustomPhonemeCardsAsync } from '../data/adminCards';
 import type { BackendCard, Card } from '../types';
 import { decorateCard } from './mappers';
 
-// Static dataset + cards authored via the local /admin page (localStorage).
-// Recomputed on each call so a card added in the admin tab shows up on the
-// next home visit without a reload.
-function allPhonemeCards(): BackendCard[] {
-  return [...(mockBackendCards as BackendCard[]), ...loadCustomPhonemeCards()];
+// Static dataset + cards authored via the local /admin page. Authored cards are
+// persisted on the dev server's disk (see data/adminCards.ts) and fetched here,
+// so a card added in the admin tab shows up for every client on the next home
+// visit -- not just the author's browser.
+async function allPhonemeCards(): Promise<BackendCard[]> {
+  return [...(mockBackendCards as BackendCard[]), ...(await loadCustomPhonemeCardsAsync())];
 }
 
 export interface CardsListResponse {
@@ -35,13 +36,13 @@ export async function listCards(params: ListCardsParams = {}): Promise<CardsList
 export async function getCard(id: string): Promise<BackendCard> {
   // Phoneme cards are local-only (see listCards), so resolve from the merged
   // static + admin-authored set rather than the backend /cards/:id endpoint.
-  const found = allPhonemeCards().find((c) => c.id === id);
+  const found = (await allPhonemeCards()).find((c) => c.id === id);
   if (!found) throw new Error('CARD_NOT_FOUND');
   return found;
 }
 
-function mockListCards({ type, limit = 20, offset = 0 }: ListCardsParams): CardsListResponse {
-  const all = allPhonemeCards();
+async function mockListCards({ type, limit = 20, offset = 0 }: ListCardsParams): Promise<CardsListResponse> {
+  const all = await allPhonemeCards();
   const filtered = type ? all.filter((c) => c.type === type) : all;
   return {
     items: filtered.slice(offset, offset + limit),

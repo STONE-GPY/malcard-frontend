@@ -1,11 +1,11 @@
-import { useMemo, useReducer, useState } from 'react';
+import { useCallback, useEffect, useMemo, useState } from 'react';
 import { Navigate, useNavigate } from 'react-router-dom';
 import { categories } from '../data/cards';
 import {
   addCustomPhonemeCard,
   addCustomSituation,
-  loadCustomPhonemeCards,
-  loadCustomSituations,
+  loadCustomPhonemeCardsAsync,
+  loadCustomSituationsAsync,
   makeCustomId,
   removeCustomPhonemeCard,
   removeCustomSituation,
@@ -50,12 +50,17 @@ function downloadJson(filename: string, data: unknown) {
 export default function AdminPage() {
   const navigate = useNavigate();
   const [tab, setTab] = useState<AdminTab>('phoneme');
-  // The data layer is plain localStorage functions, not a reactive store, so
-  // force a re-render after add/remove and read the lists fresh each render.
-  const [, refresh] = useReducer((x: number) => x + 1, 0);
-
-  const customPhoneme = loadCustomPhonemeCards();
-  const customSituations = loadCustomSituations();
+  // Authored cards are persisted on the dev server (data/adminCards.ts), so load
+  // them asynchronously into state and re-fetch after every add/remove.
+  const [customPhoneme, setCustomPhoneme] = useState<BackendCard[]>([]);
+  const [customSituations, setCustomSituations] = useState<Situation[]>([]);
+  const reload = useCallback(() => {
+    void loadCustomPhonemeCardsAsync().then(setCustomPhoneme);
+    void loadCustomSituationsAsync().then(setCustomSituations);
+  }, []);
+  useEffect(() => {
+    reload();
+  }, [reload]);
 
   // Access is gated to the developer's own machine — see lib/adminEnv.
   if (!isLocalhost()) return <Navigate to="/" replace />;
@@ -102,7 +107,7 @@ export default function AdminPage() {
           </h1>
         </div>
         <div style={{ fontSize: 13, color: '#64748B', marginBottom: 18 }}>
-          로컬 전용 · 추가한 카드는 이 브라우저(localStorage)에 저장됩니다.
+          로컬 전용 · 추가한 카드는 서버 파일에 영구 저장되어 모든 기기(폰 포함)에 바로 반영됩니다.
         </div>
 
         {/* Tab switch */}
@@ -145,12 +150,12 @@ export default function AdminPage() {
         {tab === 'phoneme' ? (
           <PhonemeCardEditor
             cards={customPhoneme}
-            onChange={refresh}
+            onChange={reload}
           />
         ) : (
           <SituationCardEditor
             situations={customSituations}
-            onChange={refresh}
+            onChange={reload}
           />
         )}
       </div>
@@ -254,12 +259,11 @@ function PhonemeCardEditor({
       prompt_question: prompt.trim(),
       phoneme_focus: phonemeFocus.trim() || undefined,
     };
-    addCustomPhonemeCard(card);
     setKorean('');
     setRussian('');
     setPrompt('');
     setPhonemeFocus('');
-    onChange();
+    void addCustomPhonemeCard(card).then(onChange);
   };
 
   return (
@@ -330,8 +334,7 @@ function PhonemeCardEditor({
             title={c.korean}
             subtitle={`${c.type} · ${c.russian}`}
             onRemove={() => {
-              removeCustomPhonemeCard(c.id);
-              onChange();
+              void removeCustomPhonemeCard(c.id).then(onChange);
             }}
           />
         ))}
@@ -383,13 +386,12 @@ function SituationCardEditor({
         level: p.level,
       })),
     };
-    addCustomSituation(situation);
     setTitle('');
     setLocation('');
     setUnitTitle('');
     setDialogue([{ character: 'other', text: '', isTarget: false }]);
     setPuzzles([{ sentence: '', level: 1 }]);
-    onChange();
+    void addCustomSituation(situation).then(onChange);
   };
 
   return (
@@ -570,8 +572,7 @@ function SituationCardEditor({
             title={`${s.icon} ${s.title}`}
             subtitle={`${s.location} · 문장 ${s.puzzles?.length ?? 0}개 · L${s.level}`}
             onRemove={() => {
-              removeCustomSituation(s.id);
-              onChange();
+              void removeCustomSituation(s.id).then(onChange);
             }}
           />
         ))}

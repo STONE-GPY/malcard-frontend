@@ -33,3 +33,7 @@ test-results/
 playwright-report/
 integration-smoke.png
 temp_cards.json
+
+# Locally authored /admin cards — persisted to disk at runtime, not committed
+src/data/custom-phoneme-cards.json
+src/data/custom-situations.json
