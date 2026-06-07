@@ -1,9 +1,10 @@
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useSituationStore } from '../stores/useSituationStore';
 import { tokens } from '../theme/tokens';
 import TopBar from '../components/common/TopBar';
+import { IconVolume } from '../components/icons';
 import { cancelSpeech, playReference } from '../lib/speech';
 
 export default function SituationStep2Page() {
@@ -21,10 +22,12 @@ export default function SituationStep2Page() {
     checkPuzzleAnswer,
   } = useSituationStore();
 
-  // True once the puzzle is solved correctly — drives the success animation
-  // and the reference-audio playback before advancing to STEP 3.
+  // True once the puzzle is solved correctly — reveals the success banner with
+  // an OPTIONAL "listen" button and the "continue to STEP 3" button. We no
+  // longer auto-play the answer or auto-advance: the learner chooses when to
+  // hear the model utterance and when to move on.
   const [solved, setSolved] = useState(false);
-  const advancingRef = useRef(false);
+  const [isListening, setIsListening] = useState(false);
 
   useEffect(() => {
     if (!currentSituation || currentSituation.id !== id) {
@@ -37,39 +40,34 @@ export default function SituationStep2Page() {
     }
   }, [currentSituation, id, navigate, slots.length, initPuzzle]);
 
-  // Reset the solved flag whenever a new puzzle is initialised (slots reset to
-  // all-empty) so the success state doesn't leak across puzzles, and stop any
-  // lingering audio when leaving the screen.
-  useEffect(() => {
-    advancingRef.current = false;
-    setSolved(false);
-    return () => cancelSpeech();
-  }, [currentPuzzleIndex]);
+  // Step2 remounts on every visit (nextPuzzle advances the index from Step3 and
+  // routes back here), so `solved`/`isListening` start false naturally — we only
+  // need to stop any lingering reference audio when leaving the screen.
+  useEffect(() => () => cancelSpeech(), []);
 
   if (!currentSituation || slots.length === 0) return null;
 
   const puzzle = currentSituation.puzzles[currentPuzzleIndex];
   if (!puzzle) return null;
 
-  // 기획서 3-2: 정답 완성 시 애니메이션 + 정답 문장 자동 음성 재생 →
-  // 따라 말하기(STEP3) 진입. 모범 응답 오디오(audio_path)가 있으면 그것을,
-  // 없으면 TTS로 정답 문장을 들려준 뒤 STEP3로 넘어간다.
+  // 기획서 3-2: 정답 완성 시 성공 애니메이션을 보여준다. 자동 재생/자동 전환은
+  // 하지 않고, 학습자가 원할 때만 정답 발화를 듣고(handleListen) STEP3로
+  // 넘어간다(handleContinue).
   const handleCheck = () => {
-    const isPerfect = checkPuzzleAnswer();
-    if (!isPerfect || advancingRef.current) return;
-    advancingRef.current = true;
-    setSolved(true);
+    if (checkPuzzleAnswer()) setSolved(true);
+  };
 
-    let navigated = false;
-    const advance = () => {
-      if (navigated) return;
-      navigated = true;
-      navigate(`/situations/${currentSituation.id}/step3`);
-    };
-    playReference(puzzle.sentence, puzzle.audio_path, { onend: advance });
-    // 재생이 끝나면 바로 진입하되, onend를 보장하지 않는 음성 엔진을 위해
-    // 상한 타이머로 진입을 보강한다(짧은 문장 청취 후 자연스럽게 전환).
-    window.setTimeout(advance, 2500);
+  // 성공 후 선택적으로 정답 발화를 들려준다: 모범 응답 오디오(audio_path)가 있으면
+  // 그것을, 없으면 TTS로 정답 문장을 재생한다.
+  const handleListen = () => {
+    playReference(puzzle.sentence, puzzle.audio_path, {
+      onstart: () => setIsListening(true),
+      onend: () => setIsListening(false),
+    });
+  };
+
+  const handleContinue = () => {
+    navigate(`/situations/${currentSituation.id}/step3`);
   };
 
   const allSlotsFilled = slots.every((s) => s !== null);
@@ -178,40 +176,86 @@ export default function SituationStep2Page() {
             data-testid="situation-puzzle-success"
             style={{
               marginBottom: 12,
-              padding: '12px 16px',
+              padding: '14px 16px',
               background: '#ECFDF5',
               border: '1px solid #6EE7B7',
               borderRadius: tokens.radiusMd,
               color: '#047857',
-              fontSize: 15,
-              fontWeight: 'bold',
-              textAlign: 'center',
               animation: 'mc-fade-up 0.3s both',
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 12,
             }}
           >
-            {t('situation.puzzleSuccess')}
+            <div style={{ fontSize: 15, fontWeight: 'bold', textAlign: 'center' }}>
+              {t('situation.puzzleSuccess')}
+            </div>
+            {/* 선택적 듣기: 학습자가 원할 때만 정답 발화를 들려준다. */}
+            <button
+              data-testid="situation-puzzle-listen"
+              onClick={handleListen}
+              aria-pressed={isListening}
+              style={{
+                display: 'inline-flex',
+                alignItems: 'center',
+                gap: 8,
+                padding: '8px 16px',
+                borderRadius: 999,
+                background: isListening ? tokens.primaryGradFlat : '#FFFFFF',
+                color: isListening ? '#FFFFFF' : tokens.primary,
+                border: `1px solid ${tokens.primary}`,
+                fontSize: 14,
+                fontWeight: 'bold',
+                cursor: 'pointer',
+              }}
+            >
+              <IconVolume size={18} style={{ color: isListening ? '#FFFFFF' : tokens.primary }} />
+              {t('situation.listen')}
+            </button>
           </div>
         )}
 
-        <button
-          data-testid="situation-check-puzzle"
-          disabled={!allSlotsFilled || solved}
-          onClick={handleCheck}
-          style={{
-            width: '100%',
-            padding: 16,
-            background: allSlotsFilled && !solved ? tokens.primaryGradFlat : '#E2E8F0',
-            color: allSlotsFilled && !solved ? '#FFFFFF' : '#94A3B8',
-            border: 'none',
-            borderRadius: tokens.radiusMd,
-            fontSize: 16,
-            fontWeight: 'bold',
-            cursor: allSlotsFilled && !solved ? 'pointer' : 'not-allowed',
-            boxShadow: allSlotsFilled && !solved ? `0 4px 12px ${tokens.primaryShadow}` : 'none',
-          }}
-        >
-          {t('situation.check')}
-        </button>
+        {solved ? (
+          <button
+            data-testid="situation-puzzle-continue"
+            onClick={handleContinue}
+            style={{
+              width: '100%',
+              padding: 16,
+              background: tokens.primaryGradFlat,
+              color: '#FFFFFF',
+              border: 'none',
+              borderRadius: tokens.radiusMd,
+              fontSize: 16,
+              fontWeight: 'bold',
+              cursor: 'pointer',
+              boxShadow: `0 4px 12px ${tokens.primaryShadow}`,
+            }}
+          >
+            {t('situation.puzzleContinue')}
+          </button>
+        ) : (
+          <button
+            data-testid="situation-check-puzzle"
+            disabled={!allSlotsFilled}
+            onClick={handleCheck}
+            style={{
+              width: '100%',
+              padding: 16,
+              background: allSlotsFilled ? tokens.primaryGradFlat : '#E2E8F0',
+              color: allSlotsFilled ? '#FFFFFF' : '#94A3B8',
+              border: 'none',
+              borderRadius: tokens.radiusMd,
+              fontSize: 16,
+              fontWeight: 'bold',
+              cursor: allSlotsFilled ? 'pointer' : 'not-allowed',
+              boxShadow: allSlotsFilled ? `0 4px 12px ${tokens.primaryShadow}` : 'none',
+            }}
+          >
+            {t('situation.check')}
+          </button>
+        )}
       </div>
     </div>
   );

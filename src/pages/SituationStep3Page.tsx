@@ -1,30 +1,62 @@
-/* eslint-disable @typescript-eslint/no-explicit-any */
-import { useEffect, useRef, useState } from 'react';
+import { useCallback, useEffect, useMemo, useRef, useState } from 'react';
 import { useParams, useNavigate } from 'react-router-dom';
 import { useTranslation } from 'react-i18next';
 import { useSituationStore } from '../stores/useSituationStore';
+import { useHistoryStore } from '../stores/useHistoryStore';
+import { useRecorder } from '../hooks/useRecorder';
+import { analyzer } from '../lib/analyzer';
 import { tokens } from '../theme/tokens';
 import TopBar from '../components/common/TopBar';
-import { IconMic, IconVolume } from '../components/icons';
+import {
+  IconAlert,
+  IconArrowRight,
+  IconMic,
+  IconRotate,
+  IconSparkle,
+  IconStop,
+  IconVolume,
+} from '../components/icons';
+import { ApiError, errorI18nKey } from '../api/client';
 import { cancelSpeech, playReference } from '../lib/speech';
+import {
+  FeedbackBubble,
+  IssuesSection,
+  PhonemeSection,
+  ProsodySection,
+  ScoreCard,
+} from '../components/result/ResultSections';
+import { resolveFeedback } from '../components/result/resultHelpers';
+import type { AnalysisResult, Card } from '../types';
 
-const SpeechRecognition =
-  (window as any).SpeechRecognition || (window as any).webkitSpeechRecognition;
+const MAX_DURATION_MS = 12_000;
+const MIN_DURATION_MS = 800;
 
+function formatTime(ms: number): string {
+  const total = Math.floor(ms / 1000);
+  const m = Math.floor(total / 60);
+  const s = total % 60;
+  return `${m}:${s.toString().padStart(2, '0')}`;
+}
+
+type Phase = 'record' | 'analyzing' | 'result';
+
+// 기획서 STEP3 (따라 말하기): 기존 발음 연습 워크플로우와 동일하게 — 마이크로
+// 녹음 → 백엔드 분석(/analysis/full, mock 시 mockAnalyzer) → 음소/억양/AI 피드백
+// 결과를 보여준다. (이전의 브라우저 SpeechRecognition 단순 일치 판정에서 교체)
 export default function SituationStep3Page() {
   const { id } = useParams<{ id: string }>();
   const navigate = useNavigate();
   const { t } = useTranslation();
   const { currentSituation, currentPuzzleIndex, nextPuzzle } = useSituationStore();
+  const recordAttempt = useHistoryStore((s) => s.recordAttempt);
 
-  const [isRecording, setIsRecording] = useState(false);
-  const [transcript, setTranscript] = useState('');
-  const [feedback, setFeedback] = useState<'idle' | 'success' | 'fail' | 'error' | 'unsupported'>('idle');
-  const [failCount, setFailCount] = useState(0);
-  const [errorMessage, setErrorMessage] = useState('');
+  const recorder = useRecorder({ maxDurationMs: MAX_DURATION_MS, minDurationMs: MIN_DURATION_MS });
+  const [phase, setPhase] = useState<Phase>('record');
+  const [result, setResult] = useState<AnalysisResult | null>(null);
+  const [error, setError] = useState<{ code: string; message: string } | null>(null);
   const [isListening, setIsListening] = useState(false);
 
-  const recognitionRef = useRef<any>(null);
+  const abortRef = useRef<AbortController | null>(null);
 
   useEffect(() => {
     if (!currentSituation || currentSituation.id !== id) {
@@ -32,69 +64,84 @@ export default function SituationStep3Page() {
     }
   }, [currentSituation, id, navigate]);
 
+  // Stop any in-flight TTS / analysis when leaving the screen.
   useEffect(() => {
-    if (!SpeechRecognition) {
-      // 브라우저가 Web Speech Recognition을 지원하지 않음(Firefox 등). 'error'와
-      // 구분해 Chrome/Edge 안내 + 건너뛰기 UI를 보여준다.
-      // eslint-disable-next-line react-hooks/set-state-in-effect
-      setFeedback('unsupported');
-      setErrorMessage(t('situation.speechUnsupported'));
-      return;
-    }
-
-    const recognition = new SpeechRecognition();
-    recognition.continuous = false;
-    recognition.interimResults = true;
-    recognition.lang = 'ko-KR';
-
-    recognition.onstart = () => {
-      setIsRecording(true);
-      setTranscript('');
-      setFeedback('idle');
-    };
-
-    recognition.onresult = (event: any) => {
-      let currentTranscript = '';
-      for (let i = event.resultIndex; i < event.results.length; ++i) {
-        currentTranscript += event.results[i][0].transcript;
-      }
-      setTranscript(currentTranscript);
-    };
-
-    recognition.onend = () => {
-      setIsRecording(false);
-    };
-
-    recognition.onerror = (event: any) => {
-      console.error('Speech recognition error', event.error);
-      setIsRecording(false);
-      setFeedback('error');
-      setErrorMessage(
-        event.error === 'not-allowed'
-          ? t('situation.micDenied')
-          : t('situation.speechError'),
-      );
-    };
-
-    recognitionRef.current = recognition;
-
     return () => {
-      recognitionRef.current?.abort();
       cancelSpeech();
+      abortRef.current?.abort();
     };
-  }, [t]);
+  }, []);
 
-  if (!currentSituation) return null;
+  const puzzle = currentSituation?.puzzles[currentPuzzleIndex];
 
-  const puzzle = currentSituation.puzzles[currentPuzzleIndex];
-  if (!puzzle) return null;
+  // Synthetic Card so the shared analyzer (which keys off `korean`) can run on
+  // the puzzle's model sentence exactly like the standalone pronunciation flow.
+  const card: Card | null = useMemo(() => {
+    if (!currentSituation || !puzzle) return null;
+    return {
+      id: `sit-${currentSituation.id}-${puzzle.id}`,
+      type: '상황형회화',
+      korean: puzzle.sentence,
+      russian: '',
+      prompt_question: '',
+    };
+  }, [currentSituation, puzzle]);
+
+  const runAnalyze = useCallback(
+    (blob: Blob) => {
+      if (!card) return;
+      abortRef.current?.abort();
+      const controller = new AbortController();
+      abortRef.current = controller;
+      setError(null);
+      setResult(null);
+      setPhase('analyzing');
+
+      analyzer
+        .analyze(blob, card, { signal: controller.signal })
+        .then((res) => {
+          if (controller.signal.aborted) return;
+          setResult(res);
+          setPhase('result');
+          // Persist to history (기록) just like the standalone pronunciation flow
+          // in ResultPage — each successful analysis is one attempt.
+          if (res.status === 'ready') {
+            recordAttempt({
+              cardId: card.id,
+              score: res.score,
+              korean: card.korean,
+              type: card.type,
+            });
+          }
+        })
+        .catch((err) => {
+          if ((err as DOMException)?.name === 'AbortError') return;
+          if (err instanceof ApiError) {
+            setError({ code: err.code, message: err.message });
+          } else {
+            setError({ code: 'PIPELINE_ERROR', message: (err as Error).message ?? '' });
+          }
+          setPhase('result');
+        });
+    },
+    [card, recordAttempt],
+  );
+
+  // Auto-submit when recording produces a blob (mirrors CardLearnPage). The
+  // setState inside runAnalyze is the external sync from the audio subsystem
+  // finishing, not a cascading render.
+  useEffect(() => {
+    if (phase === 'record' && recorder.status === 'preview' && recorder.audioBlob) {
+      // eslint-disable-next-line react-hooks/set-state-in-effect
+      runAnalyze(recorder.audioBlob);
+    }
+  }, [phase, recorder.status, recorder.audioBlob, runAnalyze]);
+
+  if (!currentSituation || !puzzle || !card) return null;
 
   const handleMicClick = () => {
-    if (isRecording) {
-      recognitionRef.current?.stop();
-    } else {
-      recognitionRef.current?.start();
-    }
+    if (recorder.status === 'recording') recorder.stop();
+    else recorder.start();
   };
 
   // 모범 응답(듣기 예시) 재생: audio_path 우선, 없으면 TTS.
@@ -105,20 +152,12 @@ export default function SituationStep3Page() {
     });
   };
 
-  const normalizeText = (text: string) => {
-    return text.replace(/[.,!?]/g, '').replace(/\s+/g, '').trim();
-  };
-
-  const handleCheck = () => {
-    const target = normalizeText(puzzle.sentence);
-    const spoken = normalizeText(transcript);
-
-    if (spoken === target) {
-      setFeedback('success');
-    } else {
-      setFeedback('fail');
-      setFailCount((prev) => prev + 1);
-    }
+  const handleRerecord = () => {
+    abortRef.current?.abort();
+    recorder.reset();
+    setResult(null);
+    setError(null);
+    setPhase('record');
   };
 
   const handleNext = () => {
@@ -129,6 +168,14 @@ export default function SituationStep3Page() {
       navigate(`/situations/${currentSituation.id}/result`, { replace: true });
     }
   };
+
+  const isLast = currentPuzzleIndex >= currentSituation.puzzles.length - 1;
+  const nextLabel = isLast ? t('situation.viewResult') : t('situation.nextSentence');
+
+  const recording = recorder.status === 'recording';
+  const denied = recorder.status === 'denied';
+  const errored = recorder.status === 'error';
+  const remaining = Math.max(0, MAX_DURATION_MS - recorder.durationMs);
 
   return (
     <div
@@ -147,151 +194,300 @@ export default function SituationStep3Page() {
         onBack={() => navigate(`/situations/${currentSituation.id}/step2`)}
       />
 
-      <div style={{ flex: 1, padding: 20, display: 'flex', flexDirection: 'column', alignItems: 'center' }}>
-        <div style={{ marginTop: 20, marginBottom: 40, padding: 24, background: '#FFFFFF', borderRadius: 16, width: '100%', boxShadow: '0 4px 6px rgba(0,0,0,0.02)', textAlign: 'center' }}>
-          <div data-testid="situation-target-sentence" style={{ fontSize: 24, fontWeight: 'bold', color: '#0F172A', lineHeight: 1.4 }}>
-            {puzzle.sentence}
-          </div>
-          {/* 기획서 4-2: 모범 응답 오디오는 '듣기 예시'로 우선 활용 — 아이가
-              먼저 듣고 따라 말한다. audio_path 우선, 없으면 TTS. */}
-          <button
-            data-testid="situation-listen"
-            onClick={handleListen}
-            aria-pressed={isListening}
-            style={{
-              marginTop: 16,
-              display: 'inline-flex',
-              alignItems: 'center',
-              gap: 8,
-              padding: '10px 18px',
-              borderRadius: 999,
-              background: isListening ? tokens.primaryGradFlat : '#FFFFFF',
-              color: isListening ? '#FFFFFF' : tokens.primary,
-              border: `1px solid ${tokens.primary}`,
-              fontSize: 14,
-              fontWeight: 'bold',
-              cursor: 'pointer',
-            }}
-          >
-            <IconVolume size={18} style={{ color: isListening ? '#FFFFFF' : tokens.primary }} />
-            {t('situation.listen')}
-          </button>
-        </div>
-
-        <div style={{ flex: 1, display: 'flex', flexDirection: 'column', justifyContent: 'center', alignItems: 'center', width: '100%' }}>
-          <div data-testid="situation-transcript" style={{ minHeight: 60, marginBottom: 40, fontSize: 18, color: isRecording ? tokens.primary : '#475569', textAlign: 'center' }}>
-            {transcript || (isRecording ? t('situation.listening') : t('situation.micPrompt'))}
-          </div>
-
-          {feedback === 'success' && (
-            <div data-testid="situation-speech-success" style={{ color: '#10B981', fontWeight: 'bold', fontSize: 20, marginBottom: 20 }}>
-              {t('situation.success')}
-            </div>
-          )}
-          {feedback === 'fail' && (
-            <div style={{ color: '#EF4444', fontWeight: 'bold', fontSize: 16, marginBottom: 20 }}>
-              {t('situation.fail', { count: failCount })}
-            </div>
-          )}
-          {feedback === 'error' && (
-            <div data-testid="situation-speech-error" style={{ color: '#EF4444', fontSize: 14, marginBottom: 20, maxWidth: '80%', lineHeight: 1.5 }}>
-              {errorMessage}
-            </div>
-          )}
-          {feedback === 'unsupported' && (
+      <div
+        style={{
+          flex: 1,
+          minHeight: 0,
+          overflowY: 'auto',
+          WebkitOverflowScrolling: 'touch',
+          overscrollBehavior: 'contain',
+          display: 'flex',
+          flexDirection: 'column',
+        }}
+      >
+        {/* Target sentence + optional reference playback — always visible so the
+            learner can re-listen before re-recording. */}
+        {phase !== 'analyzing' && (
+          <div style={{ padding: 20, paddingBottom: 0 }}>
             <div
-              data-testid="situation-speech-unsupported"
               style={{
-                background: '#EFF6FF',
-                border: '1px solid #BFDBFE',
-                color: '#1D4ED8',
-                fontSize: 14,
-                lineHeight: 1.6,
-                padding: '14px 16px',
-                borderRadius: 12,
-                marginBottom: 24,
-                maxWidth: '90%',
+                padding: 24,
+                background: '#FFFFFF',
+                borderRadius: 16,
+                width: '100%',
+                boxShadow: '0 4px 6px rgba(0,0,0,0.02)',
                 textAlign: 'center',
               }}
             >
-              {errorMessage}
+              <div
+                data-testid="situation-target-sentence"
+                style={{ fontSize: 24, fontWeight: 'bold', color: '#0F172A', lineHeight: 1.4 }}
+              >
+                {puzzle.sentence}
+              </div>
+              <button
+                data-testid="situation-listen"
+                onClick={handleListen}
+                aria-pressed={isListening}
+                style={{
+                  marginTop: 16,
+                  display: 'inline-flex',
+                  alignItems: 'center',
+                  gap: 8,
+                  padding: '10px 18px',
+                  borderRadius: 999,
+                  background: isListening ? tokens.primaryGradFlat : '#FFFFFF',
+                  color: isListening ? '#FFFFFF' : tokens.primary,
+                  border: `1px solid ${tokens.primary}`,
+                  fontSize: 14,
+                  fontWeight: 'bold',
+                  cursor: 'pointer',
+                }}
+              >
+                <IconVolume size={18} style={{ color: isListening ? '#FFFFFF' : tokens.primary }} />
+                {t('situation.listen')}
+              </button>
             </div>
-          )}
+          </div>
+        )}
 
-          {feedback !== 'success' && feedback !== 'error' && feedback !== 'unsupported' && failCount < 3 ? (
+        {/* ---- RECORD PHASE ---- */}
+        {phase === 'record' && (
+          <div
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              width: '100%',
+              padding: 20,
+            }}
+          >
+            <div
+              style={{
+                fontSize: 14,
+                fontWeight: 600,
+                color: denied || errored ? '#EF4444' : recording ? '#EF4444' : '#475569',
+                marginBottom: 14,
+                textAlign: 'center',
+              }}
+            >
+              {denied
+                ? t('situation.micDenied')
+                : errored
+                  ? recorder.errorMessage ?? t('situation.speechError')
+                  : recording
+                    ? t('situation.recording')
+                    : t('situation.micPrompt')}
+            </div>
+
+            {recording && (
+              <div
+                data-testid="record-timer"
+                style={{
+                  fontSize: 12,
+                  color: '#64748B',
+                  marginBottom: 14,
+                  fontVariantNumeric: 'tabular-nums',
+                }}
+              >
+                <span style={{ color: '#0F172A', fontWeight: 700 }}>
+                  {formatTime(recorder.durationMs)}
+                </span>
+                <span style={{ color: '#94A3B8', margin: '0 6px' }}>·</span>
+                {t('learn.remainingLabel')} {formatTime(remaining)}
+              </div>
+            )}
+
             <button
               data-testid="situation-mic"
               onClick={handleMicClick}
+              aria-label={recording ? t('situation.recording') : t('situation.micPrompt')}
               style={{
                 width: 80,
                 height: 80,
                 borderRadius: '50%',
-                background: isRecording ? '#FEF2F2' : tokens.primaryGradFlat,
-                border: isRecording ? `2px solid #EF4444` : 'none',
-                color: isRecording ? '#EF4444' : '#FFFFFF',
+                background: recording ? '#FEF2F2' : tokens.primaryGradFlat,
+                border: recording ? `2px solid #EF4444` : 'none',
+                color: recording ? '#EF4444' : '#FFFFFF',
                 display: 'flex',
                 alignItems: 'center',
                 justifyContent: 'center',
-                boxShadow: isRecording ? `0 0 0 8px #FEF2F2` : `0 8px 24px ${tokens.primaryShadow}`,
+                boxShadow: recording ? `0 0 0 8px #FEF2F2` : `0 8px 24px ${tokens.primaryShadow}`,
                 cursor: 'pointer',
                 transition: 'all 0.2s',
-                animation: isRecording ? 'pulse 1.5s infinite' : 'none',
+                animation: recording ? 'pulse 1.5s infinite' : 'none',
               }}
             >
-              <IconMic size={36} style={{ color: isRecording ? '#EF4444' : '#FFFFFF' }} />
+              {recording ? (
+                <IconStop size={32} style={{ color: '#EF4444' }} />
+              ) : (
+                <IconMic size={36} style={{ color: '#FFFFFF' }} />
+              )}
             </button>
-          ) : (
-            <button
-              data-testid="situation-next"
-              onClick={handleNext}
-              style={{
-                width: '100%',
-                padding: 16,
-                background: tokens.primaryGradFlat,
-                color: '#FFFFFF',
-                border: 'none',
-                borderRadius: tokens.radiusMd,
-                fontSize: 16,
-                fontWeight: 'bold',
-                boxShadow: `0 4px 12px ${tokens.primaryShadow}`,
-                cursor: 'pointer',
-              }}
-            >
-              {feedback === 'unsupported' || feedback === 'error'
-                ? t('situation.speechSkip')
-                : currentPuzzleIndex < currentSituation.puzzles.length - 1
-                  ? t('situation.nextSentence')
-                  : t('situation.viewResult')}
-            </button>
-          )}
 
-          {transcript && !isRecording && feedback === 'idle' && (
-            <button
-              data-testid="situation-check-speech"
-              onClick={handleCheck}
+            <style>{`
+              @keyframes pulse {
+                0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
+                70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
+                100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
+              }
+            `}</style>
+          </div>
+        )}
+
+        {/* ---- ANALYZING PHASE ---- */}
+        {phase === 'analyzing' && (
+          <div
+            data-testid="situation-analyzing"
+            style={{
+              flex: 1,
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              alignItems: 'center',
+              textAlign: 'center',
+              padding: 40,
+              gap: 18,
+            }}
+          >
+            <div
               style={{
-                marginTop: 24,
-                padding: '12px 24px',
-                background: '#FFFFFF',
-                color: tokens.primary,
-                border: `1px solid ${tokens.primary}`,
-                borderRadius: tokens.radiusMd,
-                fontWeight: 'bold',
-                cursor: 'pointer',
+                width: 96,
+                height: 96,
+                borderRadius: '50%',
+                background: tokens.primaryGrad,
+                display: 'flex',
+                alignItems: 'center',
+                justifyContent: 'center',
+                color: '#fff',
+                boxShadow: `0 16px 36px -10px ${tokens.primaryShadow}`,
+                animation: 'mc-bounce 2s ease-in-out infinite',
               }}
             >
-              {t('situation.checkPronunciation')}
-            </button>
-          )}
+              <IconSparkle size={44} stroke={2} />
+            </div>
+            <div style={{ fontSize: 20, fontWeight: 700, color: '#0F172A' }}>
+              {t('loading.title')}
+            </div>
+            <div style={{ fontSize: 14, color: '#64748B' }}>{t('loading.subtitle')}</div>
+          </div>
+        )}
 
-          <style>{`
-            @keyframes pulse {
-              0% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0.4); }
-              70% { box-shadow: 0 0 0 20px rgba(239, 68, 68, 0); }
-              100% { box-shadow: 0 0 0 0 rgba(239, 68, 68, 0); }
-            }
-          `}</style>
-        </div>
+        {/* ---- RESULT PHASE ---- */}
+        {phase === 'result' && (
+          <div style={{ paddingBottom: 20 }}>
+            {error ? (
+              <div
+                data-testid="situation-result-error"
+                style={{
+                  margin: `16px ${tokens.pad}px 0`,
+                  padding: 20,
+                  background: '#FEF2F2',
+                  border: '1px solid #FECACA',
+                  borderRadius: tokens.radiusLg,
+                  color: '#991B1B',
+                }}
+              >
+                <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 6 }}>
+                  {t('result.errorTitle')}
+                </div>
+                <div style={{ fontSize: 13, lineHeight: 1.5 }}>{t(errorI18nKey(error.code))}</div>
+              </div>
+            ) : result && (result.status === 'retry' || result.status === 'discarded') ? (
+              <div
+                data-testid="situation-result-banner"
+                style={{
+                  margin: `16px ${tokens.pad}px 0`,
+                  padding: 20,
+                  background: result.status === 'retry' ? '#FFFBEB' : '#FEF2F2',
+                  border: `1px solid ${result.status === 'retry' ? '#FDE68A' : '#FECACA'}`,
+                  borderRadius: tokens.radiusLg,
+                  color: result.status === 'retry' ? '#B45309' : '#991B1B',
+                  display: 'flex',
+                  gap: 12,
+                  alignItems: 'flex-start',
+                }}
+              >
+                <div style={{ flexShrink: 0, marginTop: 2 }}>
+                  <IconAlert size={22} stroke={2.2} />
+                </div>
+                <div>
+                  <div style={{ fontSize: 15, fontWeight: 700, marginBottom: 4 }}>
+                    {result.status === 'retry'
+                      ? t('result.retryBannerTitle')
+                      : t('result.discardedBannerTitle')}
+                  </div>
+                  <div style={{ fontSize: 13, lineHeight: 1.5 }}>
+                    {result.status === 'retry'
+                      ? t('result.retryBannerBody')
+                      : t('result.discardedBannerBody')}
+                  </div>
+                </div>
+              </div>
+            ) : result ? (
+              <>
+                <ScoreCard result={result} reference={puzzle.sentence} />
+                <PhonemeSection result={result} />
+                <IssuesSection result={result} />
+                <ProsodySection result={result} />
+                <FeedbackBubble text={resolveFeedback(t, result.aiFeedback)} />
+              </>
+            ) : null}
+
+            <div
+              style={{
+                display: 'flex',
+                gap: 10,
+                padding: `20px ${tokens.pad}px 0`,
+              }}
+            >
+              <button
+                data-testid="situation-rerecord"
+                onClick={handleRerecord}
+                style={{
+                  flex: 1,
+                  padding: '14px 16px',
+                  borderRadius: tokens.radiusMd,
+                  background: '#FFFFFF',
+                  border: '1px solid #E2E8F0',
+                  color: '#0F172A',
+                  fontSize: 15,
+                  fontWeight: 600,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 7,
+                  cursor: 'pointer',
+                }}
+              >
+                <IconRotate size={18} stroke={2.2} /> {t('result.actionRetry')}
+              </button>
+              <button
+                data-testid="situation-next"
+                onClick={handleNext}
+                style={{
+                  flex: 1,
+                  padding: '14px 16px',
+                  borderRadius: tokens.radiusMd,
+                  background: tokens.primaryGradFlat,
+                  color: '#fff',
+                  fontSize: 15,
+                  fontWeight: 700,
+                  display: 'flex',
+                  alignItems: 'center',
+                  justifyContent: 'center',
+                  gap: 7,
+                  boxShadow: `0 8px 18px -6px ${tokens.primaryShadow}`,
+                  cursor: 'pointer',
+                }}
+              >
+                {nextLabel} <IconArrowRight size={18} stroke={2.4} />
+              </button>
+            </div>
+          </div>
+        )}
       </div>
     </div>
   );

@@ -193,47 +193,6 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
   });
   test('Situation learning flow supports deck filtering, puzzle, speech, and completion', async ({ page }) => {
     await mockBackend(page);
-    await page.addInitScript(() => {
-      class MockSpeechRecognition {
-        continuous = false;
-        interimResults = true;
-        lang = 'ko-KR';
-        onstart?: () => void;
-        onresult?: (event: unknown) => void;
-        onend?: () => void;
-
-        start() {
-          this.onstart?.();
-          const transcript = document
-            .querySelector('[data-testid="situation-target-sentence"]')
-            ?.textContent ?? '';
-          setTimeout(() => {
-            this.onresult?.({
-              resultIndex: 0,
-              results: [[{ transcript }]],
-            });
-            this.onend?.();
-          }, 20);
-        }
-
-        stop() {
-          this.onend?.();
-        }
-
-        abort() {
-          this.onend?.();
-        }
-      }
-
-      Object.defineProperty(window, 'SpeechRecognition', {
-        configurable: true,
-        value: MockSpeechRecognition,
-      });
-      Object.defineProperty(window, 'webkitSpeechRecognition', {
-        configurable: true,
-        value: MockSpeechRecognition,
-      });
-    });
 
     await page.goto('/');
     await expect(page.locator('[data-testid="card-row"]').first()).toBeVisible();
@@ -262,12 +221,15 @@ test.describe('MalCard end-to-end (mocked backend)', () => {
         await page.locator(`[data-testid="situation-word"][data-word="${word}"]`).click();
       }
       await page.locator('[data-testid="situation-check-puzzle"]').click();
+      await page.locator('[data-testid="situation-puzzle-continue"]').click();
       await expect(page).toHaveURL(/\/step3$/, { timeout: 5000 });
 
-      await page.locator('[data-testid="situation-mic"]').click();
-      await expect(page.locator('[data-testid="situation-check-speech"]')).toBeVisible();
-      await page.locator('[data-testid="situation-check-speech"]').click();
-      await expect(page.locator('[data-testid="situation-speech-success"]')).toBeVisible();
+      // Pronunciation step now records via the real recorder (fake mic) and runs
+      // the mocked backend analysis, mirroring the standalone /learn→result flow.
+      await page.locator('[data-testid="situation-mic"]').click(); // start
+      await page.waitForTimeout(800);
+      await page.locator('[data-testid="situation-mic"]').click(); // stop → analyze
+      await expect(page.locator('[data-testid="situation-next"]')).toBeVisible({ timeout: 10_000 });
       await page.locator('[data-testid="situation-next"]').click();
 
       if (i < answers.length - 1) {

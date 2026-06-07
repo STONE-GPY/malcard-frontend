@@ -1,6 +1,24 @@
 import type { ApiErrorBody } from '../types';
 
-export const API_BASE_URL = (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? 'http://localhost:8000';
+// When VITE_API_BASE_URL is not set, talk to the SAME origin the page is served
+// from. The Vite dev server proxies the backend routes (/analysis, /tts, ...)
+// to localhost:8000 (see vite.config.ts), so a single origin works for local,
+// LAN (phone), and Cloudflare tunnel alike — port 8000 is never exposed.
+// Returning the origin (not '') keeps speech.ts's `!API_BASE_URL` guard happy.
+// An explicit VITE_API_BASE_URL always wins (e.g. a deployed backend).
+function defaultApiBaseUrl(): string {
+  if (typeof window !== 'undefined' && window.location?.origin) {
+    const { protocol, origin } = window.location;
+    // file:// or other non-http origins → fall back to localhost.
+    if (protocol === 'http:' || protocol === 'https:') {
+      return origin;
+    }
+  }
+  return 'http://localhost:8000';
+}
+
+export const API_BASE_URL =
+  (import.meta.env.VITE_API_BASE_URL as string | undefined) ?? defaultApiBaseUrl();
 
 // Compile-time default from .env.* files. Code paths that need to react to the
 // dev-panel toggle should call useMockApi() instead of reading this constant.

@@ -35,22 +35,26 @@ async function practiceLegacyCard(page: Page, koTitle: string) {
 }
 
 // Reusable solver for a single puzzle on /situations/:id/step2: click each
-// answer word in order, press check, wait for the navigation to step3.
+// answer word in order, press check, then tap "따라 말하기" to advance to step3.
+// Solving no longer auto-advances — the model utterance is optional.
 async function solvePuzzle(page: Page, answer: string[]) {
   for (const word of answer) {
     await page.locator(`[data-testid="situation-word"][data-word="${word}"]`).click();
   }
   await page.locator('[data-testid="situation-check-puzzle"]').click();
+  await expect(page.locator('[data-testid="situation-puzzle-success"]')).toBeVisible();
+  await page.locator('[data-testid="situation-puzzle-continue"]').click();
   await expect(page).toHaveURL(/\/step3$/, { timeout: 5_000 });
 }
 
-// Reusable speech-check pass for /situations/:id/step3 — fires the mocked
-// SpeechRecognition, verifies success, and clicks Next to advance.
+// Reusable pronunciation pass for /situations/:id/step3 — records via the real
+// recorder (fake mic), lets the (mocked) backend analysis return a result, then
+// clicks Next to advance. Mirrors the standalone pronunciation workflow.
 async function passSpeechCheck(page: Page) {
-  await page.locator('[data-testid="situation-mic"]').click();
-  await expect(page.locator('[data-testid="situation-check-speech"]')).toBeVisible();
-  await page.locator('[data-testid="situation-check-speech"]').click();
-  await expect(page.locator('[data-testid="situation-speech-success"]')).toBeVisible();
+  await page.locator('[data-testid="situation-mic"]').click(); // start recording
+  await page.waitForTimeout(800);
+  await page.locator('[data-testid="situation-mic"]').click(); // stop → auto-analyze
+  await expect(page.locator('[data-testid="situation-next"]')).toBeVisible({ timeout: 10_000 });
   await page.locator('[data-testid="situation-next"]').click();
 }
 
@@ -378,8 +382,12 @@ test.describe('MalCard scenarios — additional flows (PR3)', () => {
       await page.locator(`[data-testid="situation-word"][data-word="${word}"]`).click();
     }
     await page.locator('[data-testid="situation-check-puzzle"]').click();
-    // 기획서 3-2: 정답 시 성공 피드백 표시 후 정답 문장 음성 재생 → STEP3 진입.
+    // 기획서 3-2: 정답 시 성공 피드백 표시 + 선택적 듣기. 자동 전환 없음 —
+    // 학습자가 "따라 말하기"를 눌러야 STEP3로 넘어간다.
     await expect(page.locator('[data-testid="situation-puzzle-success"]')).toBeVisible();
+    await expect(page.locator('[data-testid="situation-puzzle-listen"]')).toBeVisible();
+    await expect(page).toHaveURL(/\/step2$/);
+    await page.locator('[data-testid="situation-puzzle-continue"]').click();
     await expect(page).toHaveURL(/\/step3$/, { timeout: 5_000 });
   });
 
@@ -392,6 +400,7 @@ test.describe('MalCard scenarios — additional flows (PR3)', () => {
       await page.locator(`[data-testid="situation-word"][data-word="${word}"]`).click();
     }
     await page.locator('[data-testid="situation-check-puzzle"]').click();
+    await page.locator('[data-testid="situation-puzzle-continue"]').click();
     await expect(page).toHaveURL(/\/step3$/, { timeout: 5_000 });
     const listen = page.locator('[data-testid="situation-listen"]');
     await expect(listen).toBeVisible();

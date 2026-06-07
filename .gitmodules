@@ -1,0 +1,4 @@
+[submodule "backend"]
+	path = backend
+	url = https://github.com/STONE-GPY/malcard-backend.git
+	branch = fix/prosody-syllable-length-mismatch

@@ -355,22 +355,22 @@ export default function ProfilePage() {
       <SettingsGroup>
         <SettingRow
           icon="🔔"
-          label="알림"
-          sub="저녁 9시"
+          label={t('profile.reminders')}
+          sub={t('profile.remindersSub')}
           trailing={<Toggle on={reminders} onChange={() => setReminders(!reminders)} />}
         />
         <SettingDiv />
         <SettingRow
           icon="🔊"
-          label="자동 재생"
-          sub="카드 펼칠 때 듣기"
+          label={t('profile.autoplay')}
+          sub={t('profile.autoplaySub')}
           trailing={<Toggle on={autoplay} onChange={() => setAutoplay(!autoplay)} />}
         />
         <SettingDiv />
         <SettingRow
           icon="🎯"
-          label="엄격 모드"
-          sub="발음 기준 높임"
+          label={t('profile.strictMode')}
+          sub={t('profile.strictModeSub')}
           trailing={<Toggle on={strictMode} onChange={() => setStrict(!strictMode)} />}
         />
       </SettingsGroup>
@@ -423,8 +423,8 @@ export default function ProfilePage() {
         <SettingsGroup>
           <SettingRow
             icon="🛠️"
-            label="카드 관리"
-            sub="발음·상황 카드 추가 (개발자)"
+            label={t('profile.cardAdmin')}
+            sub={t('profile.cardAdminSub')}
             onClick={() => navigate('/admin')}
             trailing={<TriangleArrow />}
           />
