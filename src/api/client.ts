@@ -23,7 +23,7 @@ export const API_BASE_URL =
 // Compile-time default from .env.* files. Code paths that need to react to the
 // dev-panel toggle should call useMockApi() instead of reading this constant.
 export const USE_MOCK_API =
-  (import.meta.env.VITE_USE_MOCK_API as string | undefined)?.toLowerCase() !== 'false';
+  (import.meta.env.VITE_USE_MOCK_API as string | undefined)?.toLowerCase() === 'true';
 
 const MOCK_OVERRIDE_KEY = 'mc-dev-mock-mode';
 
